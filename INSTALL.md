@@ -83,23 +83,28 @@ On failure a line starts with `Could not refresh:` (a `WARNING:` line, if any, a
 
 | It contains | Do |
 |---|---|
+| `error -10825` (WAExport built for a newer macOS) | `git pull --ff-only`, then steps 3 and 4 again, then retry. If it repeats, stop and report the line |
 | `WAExport has no Full Disk Access` or `WAExport did not answer` | HUMAN STEP below |
 | `WhatsApp for Mac data not found` | Say *"Open WhatsApp on this Mac, let it sync and tell me."* Retry. |
 | `not found: run make install` | Go back to step 4 |
 | `WhatsApp changed its database` | Stop; suggest a GitHub issue with no personal data |
 
-**HUMAN STEP.** Run this, then say the text:
+**HUMAN STEP.** macOS lets no app request this permission; only the user can switch it on. Run:
 
 ```bash
-open "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles"; open -R /Applications/WAExport.app
+make grant
 ```
 
-> I've opened System Settings > Privacy & Security > Full Disk Access and a Finder window with WAExport.
-> Click **+** (or drag WAExport into the list), choose `/Applications/WAExport.app` and switch it on. If
-> WAExport was already listed, remove it with **-** first, then add it again. Give this permission only
-> to WAExport. Tell me when it's done.
+It opens System Settings > Privacy & Security > Full Disk Access and a Finder window with WAExport,
+copies the app's path to the clipboard, and waits (up to 10 minutes) until WAExport can read, then
+prints `[ok] WAExport can read WhatsApp`. If your tool cannot wait that long, run it in the background
+or with `GRANT_WAIT_SECONDS=90` and repeat. While it waits, say:
 
-Retry `uv run wa refresh`, at most three times; then stop and report the exact `Could not refresh:` line.
+> I've opened Full Disk Access and a Finder window with WAExport. Please drag WAExport from that window
+> into the list and switch it on (if WAExport is already listed, remove it with **-** first). Only
+> WAExport needs this permission. I'll notice when it's done.
+
+If it ends with `[error]`, report that line and stop.
 If the output contains `WARNING: the process running this tool`, say *"<app> has Full Disk Access and
 could read WhatsApp unfiltered. Please remove it from the list; only WAExport should be there."*
 

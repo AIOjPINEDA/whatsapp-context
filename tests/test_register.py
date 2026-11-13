@@ -221,8 +221,15 @@ FAKES = {
             'mkdir -p "$(dirname "$bin")"; echo bin > "$bin"; chmod +x "$bin"\n'
             'case "$*" in *install*) dest="${3#INSTALLED=}"\n'
             '  mkdir -p "$dest" && cp -R build/WAExport.app/. "$dest" ;; esac',
-    "uv": 'case "$*" in *"wa refresh"*) cat "$FAKES/refresh_out"; exit "$(cat "$FAKES/refresh_code")" ;; esac',
+    # refresh answers from files; with granted_after=N, call N+1 onwards succeeds (the user switched it on).
+    "uv": 'case "$*" in *"wa refresh"*) sleep "${FAKE_REFRESH_SECONDS:-0}"\n'
+          '  n=$(( $(cat "$FAKES/refresh_calls" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$FAKES/refresh_calls"\n'
+          '  if [ -f "$FAKES/granted_after" ] && [ "$n" -gt "$(cat "$FAKES/granted_after")" ]; then\n'
+          '    echo "WhatsApp data as of today."; exit 0\n  fi\n'
+          '  cat "$FAKES/refresh_out"; exit "$(cat "$FAKES/refresh_code")" ;; esac',
+    "pbcopy": 'cat > "$FAKES/clipboard"',  # never the real clipboard
 }
+DENIED = "Could not refresh: WAExport has no Full Disk Access: run `make grant` in /repo. Latest data: never.\n"
 
 
 @pytest.fixture
@@ -231,7 +238,8 @@ def setup_sh(tmp_path):
     repo, fakes, home, apps = tmp_path / "repo", tmp_path / "fakes", tmp_path / "home", tmp_path / "Apps"
     (repo / "scripts").mkdir(parents=True)
     (repo / "config").mkdir()
-    shutil.copy(REPO / "scripts" / "setup.sh", repo / "scripts" / "setup.sh")
+    for script in ("setup.sh", "grant.sh"):
+        shutil.copy(REPO / "scripts" / script, repo / "scripts" / script)
     (repo / "config" / "policy.example.toml").write_text("")
     (home / "Library" / "Group Containers" / "group.net.whatsapp.WhatsApp.shared").mkdir(parents=True)
     fakes.mkdir()
@@ -243,10 +251,10 @@ def setup_sh(tmp_path):
     (fakes / "refresh_out").write_text("WhatsApp data as of today.\n")
     (fakes / "refresh_code").write_text("0")
     env = {"HOME": str(home), "PATH": f"{fakes}:/usr/bin:/bin", "FAKES": str(fakes),
-           "INSTALLED": str(apps / "WAExport.app")}
+           "INSTALLED": str(apps / "WAExport.app"), "GRANT_WAIT_SECONDS": "0", "GRANT_POLL_SECONDS": "0"}
 
-    def run(stdin: str = "", **extra: str) -> subprocess.CompletedProcess:
-        return subprocess.run(["/bin/bash", str(repo / "scripts" / "setup.sh")], input=stdin, capture_output=True,
+    def run(stdin: str = "", script: str = "setup.sh", **extra: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["/bin/bash", str(repo / "scripts" / script)], input=stdin, capture_output=True,
                               text=True, env=env | extra, timeout=60)
 
     run.fakes, run.apps = fakes, apps
@@ -302,3 +310,68 @@ def test_setup_classifies_refresh_failures_by_the_reason_line(setup_sh, reason, 
     assert proc.returncode == 1
     assert ("Privacy_AllFiles" in (setup_sh.fakes / "calls").read_text()) == denied
     assert ("other than Full Disk Access" in proc.stderr) != denied
+
+
+# --- grant.sh: the Full Disk Access step on its own (make grant) -------------------------------
+
+def _grant(setup_sh, **extra: str) -> subprocess.CompletedProcess:
+    (setup_sh.apps / "WAExport.app").mkdir(exist_ok=True)
+    return setup_sh(script="grant.sh", **extra)
+
+
+def test_grant_script_is_valid_bash():
+    assert subprocess.run(["/bin/bash", "-n", str(REPO / "scripts" / "grant.sh")]).returncode == 0
+
+
+def test_grant_does_nothing_when_access_already_works(setup_sh):
+    proc = _grant(setup_sh)
+    assert proc.returncode == 0 and "[ok]" in proc.stdout
+    assert (setup_sh.fakes / "calls").read_text() == ""
+
+
+def test_grant_opens_settings_copies_the_path_and_waits_for_the_switch(setup_sh):
+    (setup_sh.fakes / "refresh_out").write_text(DENIED)
+    (setup_sh.fakes / "refresh_code").write_text("1")
+    (setup_sh.fakes / "granted_after").write_text("3")  # the user needs a few polls to switch it on
+    proc = _grant(setup_sh, GRANT_WAIT_SECONDS="60")
+    calls = (setup_sh.fakes / "calls").read_text()
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "Privacy_AllFiles" in calls and f"open -R {setup_sh.apps / 'WAExport.app'}" in calls
+    assert (setup_sh.fakes / "clipboard").read_text() == str(setup_sh.apps / "WAExport.app")
+    assert (setup_sh.fakes / "refresh_calls").read_text().strip() == "4" and "nothing to press" in proc.stdout
+
+
+def test_grant_gives_up_after_its_wait(setup_sh):
+    (setup_sh.fakes / "refresh_out").write_text(DENIED)
+    (setup_sh.fakes / "refresh_code").write_text("1")
+    proc = _grant(setup_sh)
+    assert proc.returncode == 1 and "make grant again" in proc.stderr
+
+
+def test_grant_stops_on_other_failures_without_opening_settings(setup_sh):
+    (setup_sh.fakes / "refresh_out").write_text("Could not refresh: the policy is invalid.\n")
+    (setup_sh.fakes / "refresh_code").write_text("1")
+    proc = _grant(setup_sh)
+    assert proc.returncode == 1 and "other than Full Disk Access" in proc.stderr
+    assert "Privacy_AllFiles" not in (setup_sh.fakes / "calls").read_text()
+
+
+def test_grant_needs_the_app_installed(setup_sh):
+    proc = setup_sh(script="grant.sh")
+    assert proc.returncode == 1 and "make setup first" in proc.stderr
+
+
+def test_grant_keeps_the_canary_warning_while_denied(setup_sh):
+    (setup_sh.fakes / "refresh_out").write_text("WARNING: this terminal has Full Disk Access.\n" + DENIED)
+    (setup_sh.fakes / "refresh_code").write_text("1")
+    proc = _grant(setup_sh)
+    assert proc.returncode == 1
+    assert "WARNING: this terminal" in proc.stdout and "WARNING: this terminal" in proc.stderr
+
+
+def test_grant_wait_is_wall_clock_including_slow_checks(setup_sh):
+    (setup_sh.fakes / "refresh_out").write_text(DENIED)
+    (setup_sh.fakes / "refresh_code").write_text("1")
+    started = time.monotonic()
+    proc = _grant(setup_sh, GRANT_WAIT_SECONDS="2", FAKE_REFRESH_SECONDS="1")
+    assert proc.returncode == 1 and time.monotonic() - started < 6

@@ -3,8 +3,8 @@
 This project reads private conversations, so a few rules come first.
 
 - **Read-only forever.** No sending, reacting, marking as read, unofficial protocols or UI automation.
-- **The helper stays minimal.** Every change to `helper/main.swift` forces users to re-grant Full Disk
-  Access; say so at the top of the PR.
+- **The helper stays minimal.** Every change to the built WAExport (`helper/main.swift`, its `Info.plist`
+  or its build flags) forces users to re-grant Full Disk Access with `make grant`; say so at the top of the PR.
 - **Never share real data**: no real chats, names, numbers, screenshots or exports in issues, PRs, tests
   or logs. Use invented data (`Pablo Prueba`, `+34 600 000 001`). Security problems: [SECURITY.md](SECURITY.md).
 

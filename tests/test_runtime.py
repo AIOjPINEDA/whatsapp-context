@@ -188,3 +188,15 @@ def test_listing_never_lets_a_name_impersonate_another_chat(env):
     with connect() as conn:
         line = next(x for x in Store(conn).all_chats("222@g.us").splitlines() if "[111@g.us]" in x)
     assert line.endswith("222@g.us [111@g.us]")  # the real JID is what the user copies
+
+
+def test_app_built_for_a_newer_macos_is_explained(env, monkeypatch, tmp_path):
+    app = tmp_path / "WAExport.app"
+    app.mkdir()
+    monkeypatch.delenv("WA_HELPER_BIN")
+    monkeypatch.setenv("WA_HELPER_APP", str(app))
+    refused = "LSOpenURLsWithRole() failed with error -10825 for the file /Applications/WAExport.app."
+    monkeypatch.setattr(exporter.subprocess, "run",
+                        lambda *a, **k: exporter.subprocess.CompletedProcess(a, 1, "", refused))
+    with pytest.raises(exporter.ExportError, match="newer macOS .*make setup"):
+        exporter.run_helper()

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.1
+
+**This release changes WAExport.** After `git pull`, run `make setup`; at its Full Disk Access step,
+remove WAExport from the list (-) and drag it in again.
+
+- WAExport is built for macOS 14 or later, the minimum the app declares, and for the Mac's own CPU even
+  from a Rosetta terminal. Before, `swiftc` used its own default minimum: the Command Line Tools
+  (Swift 6.2) on macOS 27 stamp macOS 28.0, so macOS refused to open WAExport with "You can't use this
+  version of the application" (`error -10825`). `wa` now explains that error too.
+- `make grant`: the Full Disk Access step on its own. macOS lets no app request this permission, so it
+  opens the list and a Finder window with WAExport, copies the app's path, and waits until you switch it
+  on: nothing to press in the Terminal. `make setup` uses it, and `wa` points to it when access is missing.
+- WAExport reports version 0.2.1 (`--version`, `status.json`).
+
 ## 0.2.0
 
 **This release changes WAExport.** After `make setup`, open System Settings > Privacy & Security > Full

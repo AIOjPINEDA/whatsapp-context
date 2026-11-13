@@ -81,31 +81,8 @@ else
 fi
 
 say "5/6 Full Disk Access for WAExport"
-if out=$(uv run --locked --quiet wa refresh 2>&1); then
-  printf '%s\n' "$out" | grep '^WARNING' || true
-  ok "WAExport can already read WhatsApp"
-else
-  # The first line that is not the canary WARNING says why (the WARNING mentions Full Disk Access too).
-  case "$(printf '%s\n' "$out" | grep -v '^WARNING' | head -n 1 || true)" in
-    *"Full Disk Access"*) ;;
-    *) printf '%s\n' "$out"; fail "wa refresh failed for a reason other than Full Disk Access (see above)." ;;
-  esac
-  cat <<EOF
-System Settings and a Finder window with WAExport selected will open now.
-  1. Under "Full Disk Access", click + (or drag WAExport from the Finder window into the list).
-  2. Choose $INSTALLED and switch it on.
-  3. If WAExport was already in the list from an earlier install, remove it (-) and add it again (+).
-Do NOT give this permission to Terminal, Claude, ChatGPT or any other program.
-EOF
-  open "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles" || true
-  open -R "$INSTALLED" || true
-  until uv run --locked --quiet wa refresh; do
-    echo
-    ask "Try again now that WAExport is switched on?" \
-      || fail "Without that permission WAExport cannot read WhatsApp. Run make setup again whenever you are ready."
-  done
-  ok "WAExport read WhatsApp successfully"
-fi
+INSTALLED="$INSTALLED" scripts/grant.sh \
+  || fail "Without that permission WAExport cannot read WhatsApp. Run make grant whenever you are ready."
 
 say "6/6 Connecting assistants"
 if [ ! -t 0 ]; then

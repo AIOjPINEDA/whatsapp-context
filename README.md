@@ -53,6 +53,10 @@ opens System Settings so **you** switch on Full Disk Access for WAExport (**only
 Terminal or an AI app) and offers to connect each assistant it finds. It is safe to run again. If your
 user cannot write to `/Applications`, it asks you to drag WAExport there in Finder.
 
+macOS never lets an app ask for Full Disk Access, so that one switch is yours: drag WAExport from the
+Finder window that opens into the list and turn it on. The installer notices by itself and carries on.
+To do only this step again (after an update, say), run `make grant`.
+
 ## Install with your AI agent
 
 Paste this into Claude Code, Codex or any agent that can run commands on your Mac:
@@ -130,8 +134,9 @@ Then remove WAExport from Full Disk Access and delete the folder.
 
 | You see | Do this |
 |---|---|
-| `WAExport has no Full Disk Access` | System Settings > Privacy & Security > Full Disk Access: add `/Applications/WAExport.app`, then `uv run wa refresh` |
+| `WAExport has no Full Disk Access` | `make grant`: it opens the list and Finder, and waits until you switch WAExport on |
 | It stopped working after an update | WAExport is signed ad hoc, so a new build loses the grant: remove it (-) and add it again (+) |
+| *You can't use this version of the application "WAExport"* or `error -10825` | Built before 0.2.1: `git pull`, then `make setup` |
 | `(is WhatsApp open on this Mac?)` | Open WhatsApp for Mac and let it sync |
 | `Policy entry with no match` | Copy the exact name from `uv run wa chats --all`; if *ambiguous*, use the phone number or `[JID]` |
 | `WARNING: the process running this tool ...` (always the first line) | Remove Full Disk Access from that app; only WAExport should have it |
