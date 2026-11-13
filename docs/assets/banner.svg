@@ -1,9 +1,49 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640" role="img" aria-label="whatsapp-context: your WhatsApp, as read-only context for your AI">
-<rect width="1280" height="640" fill="#0b1513"/>
-<g transform="translate(576 150) scale(2)"><path fill="#14b8a6" d="M14 6h36a10 10 0 0 1 10 10v24a10 10 0 0 1-10 10H28l-12 9v-9h-2A10 10 0 0 1 4 40V16A10 10 0 0 1 14 6z"/><g fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round"><circle cx="21" cy="28" r="7"/><circle cx="43" cy="28" r="7"/><path d="M28 27q4-3 8 0"/></g></g>
-<g font-family="-apple-system,BlinkMacSystemFont,'Helvetica Neue',Helvetica,Arial,sans-serif" text-anchor="middle">
-<text x="640" y="378" font-size="64" font-weight="700" fill="#f0fdfa">whatsapp-context</text>
-<text x="640" y="446" font-size="32" fill="#99f6e4">Your WhatsApp, as read-only context for your AI.</text>
-<text x="640" y="500" font-size="24" fill="#5eead4" fill-opacity=".8">Runs on your Mac · You choose the chats · Never sends</text>
-</g>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="1280" height="640" viewBox="0 0 1280 640" role="img"
+     aria-labelledby="banner-title banner-description">
+  <title id="banner-title">whatsapp-context</title>
+  <desc id="banner-description">Read-only WhatsApp access for AI agents</desc>
+  <style>
+    @font-face {
+      font-family: 'Barlow Condensed';
+      src: url('fonts/barlow-condensed-700.woff2') format('woff2');
+      font-weight: 700;
+    }
+    @font-face {
+      font-family: 'IBM Plex Mono';
+      src: url('fonts/ibm-plex-mono-400.woff2') format('woff2');
+    }
+    .headline { font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-weight: 700; }
+    .mono { font-family: 'IBM Plex Mono', monospace; }
+  </style>
+  <defs>
+    <linearGradient id="art-edge">
+      <stop offset=".14" stop-color="#101a19"/>
+      <stop offset=".44" stop-color="#101a19" stop-opacity=".88"/>
+      <stop offset=".73" stop-color="#101a19" stop-opacity=".2"/>
+      <stop offset="1" stop-color="#101a19" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="lower-edge" x2="0" y2="1">
+      <stop offset=".75" stop-color="#101a19" stop-opacity="0"/>
+      <stop offset="1" stop-color="#101a19" stop-opacity=".92"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="640" fill="#101a19"/>
+  <image x="220" y="-30" width="1060" height="706.667" xlink:href="rooftop-relay.webp"/>
+  <rect width="760" height="640" fill="url(#art-edge)"/>
+  <rect width="1280" height="640" fill="url(#lower-edge)"/>
+  <path fill="none" stroke="#efe5cc" stroke-opacity=".35" d="M48 113H1232M48 557H1232"/>
+  <path fill="none" stroke="#bafa82" d="M48 105v16m-8-8h16m1176-8v16m-8-8h16M48 549v16m-8-8h16m1176-8v16m-8-8h16"/>
+  <image x="58" y="58" width="38" height="38" xlink:href="logo.svg"/>
+  <text class="mono" x="109" y="84" fill="#efe5cc" font-size="22">whatsapp-context</text>
+  <g class="headline" fill="#efe5cc" font-size="118">
+    <text x="59" y="259">Chat history</text>
+    <text x="59" y="369" fill="#bafa82">Fresh context</text>
+  </g>
+  <text class="mono" x="64" y="432" fill="#efe5cc" font-size="23">
+    <tspan x="64">Read-only WhatsApp access</tspan>
+    <tspan x="64" dy="32">for AI agents</tspan>
+  </text>
+  <path fill="#efb96b" d="M64 580h7v7h-7z"/>
+  <text class="mono" x="83" y="590" fill="#efe5cc" font-size="18" letter-spacing="1.6">macOS / MCP</text>
 </svg>
