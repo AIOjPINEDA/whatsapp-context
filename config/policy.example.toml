@@ -4,7 +4,9 @@
 # As shipped, it grants NO message text: the assistant only sees chat names, times and unread counts.
 #
 # Names must match WhatsApp exactly (case and extra spaces are ignored). A phone number with country
-# code also works, e.g. "+34 600 000 000". To list the exact names:
+# code also works, e.g. "+34 600 000 000", and so does a JID. A name shared by several chats grants
+# nothing (unless they are one person's phone and linked ID); use the number or JID instead. To list
+# the exact names (each chat shows its [JID]):
 #   uv run wa chats --all --grep <text>
 # Then check the result with:
 #   uv run wa status

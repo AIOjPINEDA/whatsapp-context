@@ -42,7 +42,7 @@ def test_policy_edit_round_trips(env):
     after = load_policy(paths.policy_file())
     personal = next(p for p in after.projects if p.name == "Personal")
     assert personal.context == "Familia" and personal.patterns == ("^nada$",)
-    assert personal.chats == ("Contacto Privado", "Familia")
+    assert personal.chats == ("Contacto Privado", "222@g.us")
     assert (after.chats, after.people, after.exclude) == (before.chats, before.people, before.exclude)
     assert read_toml(claude) == raw  # rewriting an English file changes nothing
 

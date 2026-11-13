@@ -89,4 +89,4 @@ def test_allow_preserves_hand_written_keys(env):
     saved = load_policy(paths.policy_file())
     personal = next(p for p in saved.projects if p.name == "Personal")
     assert personal.patterns == ("^nada$",) and personal.people == ("Ana Investigadora",)
-    assert personal.repo == "~/dev/x" and set(personal.chats) == {"Contacto Privado", "Familia"}
+    assert personal.repo == "~/dev/x" and set(personal.chats) == {"Contacto Privado", "222@g.us"}

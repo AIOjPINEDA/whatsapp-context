@@ -79,7 +79,7 @@ uv run wa refresh
 ```
 
 Expected (exit 0): `WhatsApp data as of ...` then `N chats in the index · N messages from N content chats · SQLite ...`.
-On failure the line starts with `Could not refresh:`
+On failure a line starts with `Could not refresh:` (a `WARNING:` line, if any, always comes first).
 
 | It contains | Do |
 |---|---|
@@ -109,7 +109,7 @@ Say: *"Right now your assistant sees chat names and times only. Which chats shou
 of a name and I'll find the exact one. You can also group chats into projects and exclude chats."*
 
 For each text the user gives, run `uv run wa chats --all --grep "<text>"` (a `*` marks a readable chat)
-and let the user pick exact names. Write them to `config/policy.toml` using the keys documented in the
+and let the user pick exact names (each line ends with the chat's `[JID]`; use the JID when a name is repeated or looks like a number). Write them to `config/policy.toml` using the keys documented in the
 file itself (`[content]`, `[projects."Name"]`, `[exclude]`, `[options]`). Then:
 
 ```bash
@@ -117,7 +117,7 @@ uv run wa status
 ```
 
 Expected: no `Policy entry with no match:` or `Policy conflict:` lines; fix each with the user
-(*ambiguous* means use the phone number). An empty policy is fine if the user wants to decide later.
+(*ambiguous* means use the phone number or the JID). An empty policy is fine if the user wants to decide later.
 
 ## 8. Register the assistants the user uses
 
@@ -154,4 +154,5 @@ Try: "Prioritise my WhatsApp from the last 24 hours." It can never send messages
 ```
 
 Uninstall only if asked: quit Claude Desktop, run `make uninstall`, then **HUMAN STEP**: remove WAExport
-from Full Disk Access. Ask before deleting the repo folder (it holds `config/policy.toml`).
+from Full Disk Access. If it exits with an error, a client entry is still there and WAExport and the
+export were kept: show the user the output and change nothing by hand. Ask before deleting the repo folder (it holds `config/policy.toml`).

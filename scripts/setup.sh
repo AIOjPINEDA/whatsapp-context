@@ -6,7 +6,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-INSTALLED=/Applications/WAExport.app
+INSTALLED="${INSTALLED:-/Applications/WAExport.app}"
+DEST=$(dirname "$INSTALLED")
+BUILT=build/WAExport.app
 WHATSAPP_DATA="$HOME/Library/Group Containers/group.net.whatsapp.WhatsApp.shared"
 BOLD=""; PLAIN=""
 if [ -t 1 ]; then BOLD=$'\033[1m'; PLAIN=$'\033[0m'; fi
@@ -25,6 +27,8 @@ ask()  {
 # Registration problems are reported by register.py and never stop the installer.
 register() { uv run --locked --quiet python -I scripts/register.py "$1" || true; }
 
+up_to_date() { cmp -s "$BUILT/Contents/MacOS/WAExport" "$INSTALLED/Contents/MacOS/WAExport"; }
+
 whatsapp_installed() {
   [ -d /Applications/WhatsApp.app ] && return 0
   [ -d /Applications/WhatsApp.localized/WhatsApp.app ] && return 0
@@ -33,6 +37,8 @@ whatsapp_installed() {
 
 say "1/6 Checking requirements"
 [ "$(uname -s)" = "Darwin" ] || fail "This tool only works on macOS."
+macos=$(sw_vers -productVersion)
+[ "${macos%%.*}" -ge 14 ] 2>/dev/null || fail "This tool needs macOS 14 (Sonoma) or later; this Mac runs macOS $macos."
 whatsapp_installed \
   || fail "WhatsApp for Mac is not installed. Install it from the App Store, sign in, let it sync, then run make setup again."
 [ -d "$WHATSAPP_DATA" ] \
@@ -43,7 +49,8 @@ command -v swiftc >/dev/null 2>&1 \
   || fail "swiftc not found. Run: xcode-select --install   then run make setup again."
 command -v uv >/dev/null 2>&1 \
   || fail "uv is missing. Install it with: brew install uv   (or see https://docs.astral.sh/uv/) then run make setup again."
-ok "macOS, WhatsApp for Mac, Command Line Tools and uv"
+ok "macOS $macos, WhatsApp for Mac, Command Line Tools and uv"
+[ -w "$DEST" ] || ok "$DEST is not writable by this user: you will copy WAExport there in Finder"
 
 say "2/6 Python dependencies"
 uv sync --locked --quiet
@@ -51,11 +58,17 @@ ok ".venv is ready"
 
 say "3/6 Building WAExport (the only program that reads WhatsApp's database)"
 make -s build
-if [ -x "$INSTALLED/Contents/MacOS/WAExport" ] \
-   && cmp -s build/WAExport.app/Contents/MacOS/WAExport "$INSTALLED/Contents/MacOS/WAExport"; then
+if up_to_date; then
   ok "$INSTALLED is already up to date; left untouched (its Full Disk Access stays valid)"
+elif [ -w "$DEST" ]; then
+  make -s install INSTALLED="$INSTALLED"
+  ok "Installed $INSTALLED"
 else
-  make -s install
+  echo "A Finder window with $BUILT selected will open now: drag WAExport to $DEST"
+  echo "(replace the old copy if asked; Finder may ask for an administrator's password)."
+  open -R "$BUILT" || true
+  read -r -p "Press Enter once WAExport is in $DEST... " _ || true
+  up_to_date || fail "$INSTALLED is missing or is not this build. Copy $BUILT there, then run make setup again."
   ok "Installed $INSTALLED"
 fi
 
@@ -69,11 +82,14 @@ fi
 
 say "5/6 Full Disk Access for WAExport"
 if out=$(uv run --locked --quiet wa refresh 2>&1); then
+  printf '%s\n' "$out" | grep '^WARNING' || true
   ok "WAExport can already read WhatsApp"
-elif ! printf '%s' "$out" | grep -q "Full Disk Access"; then
-  printf '%s\n' "$out"
-  fail "wa refresh failed for a reason other than Full Disk Access (see above)."
 else
+  # The first line that is not the canary WARNING says why (the WARNING mentions Full Disk Access too).
+  case "$(printf '%s\n' "$out" | grep -v '^WARNING' | head -n 1 || true)" in
+    *"Full Disk Access"*) ;;
+    *) printf '%s\n' "$out"; fail "wa refresh failed for a reason other than Full Disk Access (see above)." ;;
+  esac
   cat <<EOF
 System Settings and a Finder window with WAExport selected will open now.
   1. Under "Full Disk Access", click + (or drag WAExport from the Finder window into the list).

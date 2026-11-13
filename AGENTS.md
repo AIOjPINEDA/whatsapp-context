@@ -13,7 +13,7 @@ served over MCP (stdio) to local assistants.
 | `helper/main.swift` | **WAExport**, the only code with Full Disk Access: read-only snapshot into `~/.local/share/whatsapp-context/wa.sqlite`. Changing it forces every user to re-grant Full Disk Access. |
 | `src/whatsapp_context/exporter.py` | Runs WAExport via `open`, keeps the export fresh, status `report()`, Full Disk Access canary. |
 | `src/whatsapp_context/policy.py` | Parses and validates `config/policy.toml` + `config/policy-claude.toml`; resolves chats. |
-| `src/whatsapp_context/policy_edit.py` | `whatsapp_allow` / `revoke` / `exclude`: writes `config/policy-claude.toml` only. |
+| `src/whatsapp_context/policy_edit.py` | `whatsapp_allow` / `revoke` / `exclude`: writes JIDs to `config/policy-claude.toml` only, under a file lock. |
 | `src/whatsapp_context/store.py` | Read-only queries on the export and all text output. |
 | `src/whatsapp_context/text.py` · `paths.py` | Dates and decoding · locations and private writes. |
 | `src/whatsapp_context/mcp_server.py` · `cli.py` | MCP server (8 tools) · `wa` CLI. |

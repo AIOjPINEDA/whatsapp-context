@@ -5,6 +5,7 @@
 An existing "whatsapp" entry is replaced or removed only when it runs this repo's Python. `codex` covers
 the ChatGPT app, Codex CLI and IDE extension (~/.codex/config.toml)."""
 
+import contextlib
 import json
 import os
 import shutil
@@ -23,6 +24,11 @@ DESKTOP = Path("~/Library/Application Support/Claude/claude_desktop_config.json"
 CODEX = Path("~/.codex/config.toml").expanduser()
 LOG = Path("~/.local/share/whatsapp-context/register-desktop.log").expanduser()
 CODEX_TABLE = f"[mcp_servers.whatsapp]\ncommand = {json.dumps(COMMAND)}\nargs = {json.dumps(ARGS)}\n"
+WAIT_SECONDS = 15 * 60
+
+
+class Incomplete(RuntimeError):
+    """`remove` left at least one of this repo's registrations in place."""
 
 
 def _ours(entry: object) -> bool:
@@ -75,8 +81,12 @@ def wait_detached() -> str:
     if os.fork():
         os._exit(0)
     LOG.parent.mkdir(parents=True, exist_ok=True)
-    with open(LOG, "a") as log:
-        deadline = time.time() + 15 * 60
+    with open(LOG, "a", buffering=1) as log:  # line-buffered: os._exit skips flushing
+        # Let go of the caller's stdin/stdout/stderr, or tools reading them until EOF wait for us.
+        os.dup2(os.open(os.devnull, os.O_RDONLY), 0)
+        os.dup2(log.fileno(), 1)
+        os.dup2(log.fileno(), 2)
+        deadline = time.time() + WAIT_SECONDS
         while desktop_running() and time.time() < deadline:
             time.sleep(1)
         if desktop_running():
@@ -106,13 +116,31 @@ def claude_code(remove: bool = False) -> str:
     current = subprocess.run([claude, "mcp", "get", "whatsapp"], capture_output=True, text=True)
     if current.returncode == 0 and COMMAND not in current.stdout:
         return _foreign("Claude Code")
-    if current.returncode == 0:
-        subprocess.run([claude, "mcp", "remove", "--scope", "user", "whatsapp"], capture_output=True)
+    if current.returncode == 0 and subprocess.run([claude, "mcp", "remove", "--scope", "user", "whatsapp"],
+                                                  capture_output=True).returncode:
+        raise RuntimeError("`claude mcp remove` failed.")
     if remove:
         return "Removed from Claude Code." if current.returncode == 0 else "Claude Code: nothing to remove."
     if subprocess.run([claude, "mcp", "add", "--scope", "user", "whatsapp", "--", COMMAND, *ARGS]).returncode:
         raise RuntimeError("`claude mcp add` failed.")
     return "Registered in Claude Code (user scope)."
+
+
+def _without_codex_table(text: str) -> str:
+    """Drop the [mcp_servers.whatsapp] table and its subtables, line by line; the caller checks the result."""
+    kept, inside = [], False
+    for line in text.splitlines(keepends=True):
+        if line.lstrip().startswith("["):
+            with contextlib.suppress(tomllib.TOMLDecodeError):  # else not a header (e.g. in a multi-line array)
+                inside = "whatsapp" in tomllib.loads(line).get("mcp_servers", {})
+        if not inside:
+            kept.append(line)
+    return "".join(kept).rstrip("\n") + "\n" if any(line.strip() for line in kept) else ""
+
+
+def _others(data: dict) -> dict:
+    """The parsed config without this server; an absent and an empty [mcp_servers] compare equal."""
+    return data | {"mcp_servers": {k: v for k, v in data.get("mcp_servers", {}).items() if k != "whatsapp"}}
 
 
 def codex(remove: bool = False) -> str:
@@ -125,8 +153,9 @@ def codex(remove: bool = False) -> str:
         return f"{CODEX} already has this server."
     if remove and entry is None:
         return f"{CODEX}: nothing to remove."
-    new = text.replace(CODEX_TABLE, "") if remove else text.rstrip("\n") + ("\n\n" if text else "") + CODEX_TABLE
-    if tomllib.loads(new).get("mcp_servers", {}).get("whatsapp") != (None if remove else ENTRY):
+    new = _without_codex_table(text) if remove else text.rstrip("\n") + ("\n\n" if text else "") + CODEX_TABLE
+    parsed = tomllib.loads(new)
+    if parsed.get("mcp_servers", {}).get("whatsapp") != (None if remove else ENTRY) or _others(parsed) != _others(data):
         raise RuntimeError(f"{CODEX} has an unusual layout; edit its [mcp_servers.whatsapp] table by hand.")
     _save(CODEX, new)
     return (f"Removed from {CODEX}." if remove else
@@ -139,12 +168,15 @@ def show() -> str:
 
 def remove() -> str:
     """Undo all three registrations, each only if it is this repo's."""
-    messages = []
+    messages, failed = [], False
     for client in (claude_code, claude_desktop, codex):
         try:
             messages.append(client(remove=True))
         except (OSError, ValueError, RuntimeError) as exc:
             messages.append(f"Could not unregister: {exc}")
+            failed = True
+    if failed:
+        raise Incomplete("\n".join(messages))
     return "\n".join(messages)
 
 
@@ -158,7 +190,7 @@ def main() -> int:
     try:
         print(targets[target]())
     except (OSError, ValueError, RuntimeError) as exc:
-        print(f"Could not register: {exc}")
+        print(exc if isinstance(exc, Incomplete) else f"Could not register: {exc}")
         return 1
     return 0
 

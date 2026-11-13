@@ -51,6 +51,7 @@ make setup
 `make setup` comprueba los requisitos, instala `/Applications/WAExport.app`, crea `config/policy.toml`,
 abre Ajustes del Sistema para que **tú** actives el Acceso total al disco de WAExport (**solo** WAExport:
 nunca Terminal ni una app de IA) y ofrece conectar cada asistente que encuentre. Puedes repetirlo sin miedo.
+Si tu usuario no puede escribir en `/Applications`, te pide arrastrar WAExport allí en Finder.
 
 ## Instalación con tu agente de IA
 
@@ -65,11 +66,12 @@ Clona https://github.com/AIOjPINEDA/whatsapp-context en ~/whatsapp-context y sig
 ## Elige qué puede leer
 
 De serie, el asistente **no** lee texto de ningún mensaje: solo nombres de chat, horas y no leídos. Busca
-los nombres exactos con `uv run wa chats --all --grep cocina` y edita `config/policy.toml`:
+los nombres exactos con `uv run wa chats --all --grep cocina` (cada chat muestra su `[JID]`) y
+edita `config/policy.toml`:
 
 ```toml
 [content]
-chats = ["Club de lectura", "+34 600 000 000"]   # nombres exactos o teléfonos
+chats = ["Club de lectura", "+34 600 000 000"]   # nombres exactos, teléfonos o JID
 people = []                                      # grupos donde esta persona participa
 
 [projects."Reforma cocina"]
@@ -85,9 +87,14 @@ days = 180
 ```
 
 - Precedencia: `exclude` > `chats` > `patterns` > `people`. Da igual mayúsculas y espacios de más.
+- Un nombre que comparten varios chats no da acceso a nada (salvo que sean el teléfono y el ID vinculado
+  de una misma persona): usa el teléfono o el JID.
 - Compruébalo con `uv run wa status`: muestra las líneas `Policy entry with no match` y `Policy conflict`.
 - Lo que pidas desde el chat (*«dale acceso al grupo X en el proyecto Y»*, *«revoca X»*, *«excluye X»*)
-  se escribe solo en `config/policy-claude.toml` y nunca puede levantar tus exclusiones.
+  se escribe solo en `config/policy-claude.toml`, por JID con el nombre como comentario, y nunca puede
+  levantar tus exclusiones. Al revocar te avisa si otra regla sigue dando acceso al chat.
+- La búsqueda devuelve 50 resultados, los más recientes, y avisa cuando se corta; súbelo con
+  `uv run wa search "presupuesto" --limit 200`.
 
 ## Asistentes compatibles
 
@@ -103,7 +110,9 @@ claude.ai y chatgpt.com en el navegador necesitan servidores remotos; este es lo
 ## Privacidad y seguridad
 
 - **Solo lectura.** WAExport abre la base de datos de WhatsApp en solo lectura, no usa la red y no puede enviar nada.
-- **Solo los chats permitidos llevan texto.** El resto son metadatos; los de `[exclude]` no aparecen en ninguna herramienta ni vista de `wa` (su nombre sigue en el índice local de la exportación).
+- **Solo los chats permitidos llevan texto.** El resto son metadatos; el índice nunca guarda el texto del
+  último mensaje, borradores ni claves de multimedia. Los de `[exclude]` no aparecen en ninguna
+  herramienta ni vista de `wa` (su nombre sigue en el índice local de la exportación).
 - **El proveedor de tu asistente recibe todo lo que el asistente lee**, como cualquier otra cosa que le enseñes.
 - **La política filtra las herramientas MCP, no tu cuenta.** Un asistente con acceso a la shell actúa como
   tú y podría leer el export directamente. El texto de los mensajes no es fiable: mantén las aprobaciones.
@@ -112,18 +121,20 @@ Modelo de amenazas y cómo avisar de un fallo: [SECURITY.md](SECURITY.md).
 
 ## Actualizar, desinstalar, problemas
 
-Actualizar: `git pull` en `~/whatsapp-context`, luego `make setup` y reinicia tus asistentes.
+Actualizar: `git pull` en `~/whatsapp-context`, luego `make setup` y reinicia tus asistentes. Si el
+[CHANGELOG](CHANGELOG.md) dice que WAExport cambió, vuelve a darle el Acceso total al disco (ver abajo).
 
 Desinstalar: cierra Claude Desktop y ejecuta `make uninstall`. Borra WAExport, el export y las entradas
-de este repo en los clientes. Después quita WAExport del Acceso total al disco y borra la carpeta.
+de este repo en los clientes; si no puede quitar una entrada, lo dice, sale con error y conserva WAExport y el export.
+Después quita WAExport del Acceso total al disco y borra la carpeta.
 
 | Si ves | Haz esto |
 |---|---|
 | `WAExport has no Full Disk Access` | Ajustes del Sistema > Privacidad y seguridad > Acceso total al disco: añade `/Applications/WAExport.app` y ejecuta `uv run wa refresh` |
 | Dejó de funcionar tras actualizar | WAExport va firmado ad hoc y una compilación nueva pierde el permiso: quítalo (-) y vuelve a añadirlo (+) |
 | `(is WhatsApp open on this Mac?)` | Abre WhatsApp para Mac y deja que sincronice |
-| `Policy entry with no match` | Copia el nombre exacto de `uv run wa chats --all`; si pone *ambiguous*, usa el teléfono |
-| `WARNING: the process running this tool ...` | Quita el Acceso total al disco a esa app; solo WAExport debe tenerlo |
+| `Policy entry with no match` | Copia el nombre exacto de `uv run wa chats --all`; si pone *ambiguous*, usa el teléfono o el `[JID]` |
+| `WARNING: the process running this tool ...` (siempre la primera línea) | Quita el Acceso total al disco a esa app; solo WAExport debe tenerlo |
 | Zona horaria incorrecta | Define `WA_TZ`, p. ej. `Europe/Madrid` |
 
 ## Preguntas frecuentes
@@ -133,6 +144,7 @@ de este repo en los clientes. Después quita WAExport del Acceso total al disco 
 - **¿Windows, Linux, iPhone o Android?** No. Solo macOS con WhatsApp para Mac.
 - **¿Lo romperá una actualización de WhatsApp?** Puede; `uv run wa status` dice qué ha cambiado.
 - **¿Puede el asistente darse acceso a más chats?** Solo con `whatsapp_allow`, que tu cliente debería pedirte aprobar cada vez.
+- **¿Encuentra un chat que ya no sale en la bandeja?** Sí: `whatsapp_chats` con `all` (y `grep`) lista todos los chats.
 
 ## Licencia
 

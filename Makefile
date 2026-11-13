@@ -20,7 +20,7 @@ help:
 	@echo "  make uninstall         remove WAExport, the export and this repo's client entries"
 
 setup:
-	@scripts/setup.sh
+	@INSTALLED="$(INSTALLED)" scripts/setup.sh
 
 build: $(APP)/Contents/MacOS/WAExport
 

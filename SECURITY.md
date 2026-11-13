@@ -7,16 +7,18 @@ it does not, and how to report a problem.
 
 - **WhatsApp's data is never modified.** The helper opens `ChatStorage.sqlite` read-only
   (`mode=ro&readonly_shm=1`, or `immutable=1` without a WAL).
-- **One program holds Full Disk Access:** `/Applications/WAExport.app`, about 290 lines of Swift with no
+- **One program holds Full Disk Access:** `/Applications/WAExport.app`, about 300 lines of Swift with no
   network and no child processes. The MCP server and `wa` launch it through `open` and run unprivileged.
 - **A misplaced permission is visible.** If the process running the server or `wa` can read WhatsApp
-  itself, the output starts with a `WARNING:` line.
+  itself, every `wa` and MCP answer (errors included) starts with a `WARNING:` line.
 - **Only allowed chats carry text.** The export indexes every chat without message text, drafts or
-  media URLs and keys; `[exclude]` chats are hidden from every MCP tool and `wa` view, even as metadata, and the chat tools answer
+  media URLs and keys: those columns are copied as `NULL`, so their values never reach the export file; `[exclude]` chats are hidden from every MCP tool and `wa` view, even as metadata, and the chat tools answer
   as if they did not exist (their name stays in the local export index).
 - **Private files.** The export folder is `0700`; policy files are written `0600`; all are git-ignored.
 - **It cannot send.** No send tool, no automation, no unofficial protocol.
-- **Policy changes from the chat** go only to `config/policy-claude.toml` and cannot lift an exclusion.
+- **Policy changes from the chat** go only to `config/policy-claude.toml`, by JID (a renamed or
+  same-named chat cannot inherit access), one edit at a time under a file lock, and cannot lift an
+  exclusion. A name shared by unlinked chats grants nothing.
 
 ## Not protected
 

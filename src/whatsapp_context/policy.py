@@ -195,10 +195,9 @@ def match(entry: str, chats: list[tuple[int, str, str]], ids: Identities) -> tup
     if identity is not None:
         return {jid for _, jid, _ in chats if jid in identity}, False
     found = {jid for _, jid, name in chats if _name(name) == _name(entry)}
-    # One person may have a phone session and a @lid session with the same name: that is one
-    # contact. Two groups, or two sessions of the same kind, are different chats.
-    groups, phones, lids = (sum(j.endswith(kind) for j in found) for kind in (GROUP, PHONE, LID))
-    return found, groups > 1 or bool(groups and len(found) > groups) or phones > 1 or lids > 1
+    # Sessions sharing a name are one person only when Identities links them (phone + @lid);
+    # otherwise two people (or groups) share the name and it grants nothing.
+    return found, len(found) > 1 and not any(found <= ids.aliases(j) for j in found)
 
 
 def _assign(sel: Selection, owners: dict[str, set[str]]) -> None:

@@ -5,10 +5,11 @@ from collections.abc import Callable
 from functools import cache
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
 from . import exporter, policy_edit
-from .exporter import CANARY_WARNING, describe, ensure_fresh, refresh, report
+from .exporter import describe, ensure_fresh, refresh, report, with_canary
 from .store import ChatNotFound, Store, connect
 from .text import parse_local, parse_until
 
@@ -37,29 +38,41 @@ Read-only access to the user's personal WhatsApp (WhatsApp for Mac), filtered by
 
 server = MCPServer("whatsapp", instructions=INSTRUCTIONS)
 READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
+
+
 @cache
 def _canary() -> bool:
     return exporter.caller_can_read_whatsapp()  # checked once, lazily: the answer does not change while running
 
 
-def _with_canary(text: str) -> str:
-    return f"{CANARY_WARNING}\n{text}" if _canary() else text
+def _failed(text: str) -> ToolError:
+    """A real error: the SDK answers it with isError=true."""
+    return ToolError(with_canary(text, _canary()))
+
+
+def _refreshed(prefix: str = "") -> str:
+    """Refresh and report; a failed refresh is an error, even after a saved policy change."""
+    ok, text = report(refresh())
+    if not ok:
+        raise _failed(prefix + text)
+    return with_canary(prefix + text, _canary())
 
 
 def _answer(build: Callable[[Store], str]) -> str:
-    status = ensure_fresh()
+    status: dict = {}
     try:
+        status = ensure_fresh()
         with connect() as conn:
             header = describe(status, conn)
             body = build(Store(conn))
     except FileNotFoundError as exc:
-        return _with_canary(f"{describe(status)}\n{exc}")
-    except (ChatNotFound, ValueError) as exc:
-        return _with_canary(str(exc))
+        raise _failed(f"{describe(status)}\n{exc}") from exc
+    except (ChatNotFound, ValueError, OSError) as exc:
+        raise _failed(str(exc)) from exc
     except sqlite3.Error as exc:
-        return _with_canary(f"The export does not have what the server expects (a WhatsApp update?): "
-                            f"{exc}. Run `uv run wa status` in the repo.")
-    return _with_canary(f"{header}\n\n{body}")
+        raise _failed(f"The export does not have what the server expects (a WhatsApp update?): "
+                      f"{exc}. Run `uv run wa status` in the repo.") from exc
+    return with_canary(f"{header}\n\n{body}", _canary())
 
 
 @server.tool(annotations=READ_ONLY)
@@ -70,9 +83,11 @@ def whatsapp_inbox(hours: int = 24) -> str:
 
 
 @server.tool(annotations=READ_ONLY)
-def whatsapp_chats() -> str:
-    """List the chats whose content is allowed, grouped by project, with their coverage (since when)."""
-    return _answer(lambda s: s.chats_overview())
+def whatsapp_chats(all: bool = False, grep: str = "") -> str:
+    """List the chats whose content is allowed, grouped by project, with their coverage (since when).
+    `all`: instead, every chat name (also old ones the inbox no longer shows), to find the exact name for
+    whatsapp_allow; * marks content chats and repeated names show their JID. `grep`: only names containing it."""
+    return _answer(lambda s: s.all_chats(grep) if all else s.chats_overview())
 
 
 @server.tool(annotations=READ_ONLY)
@@ -98,9 +113,9 @@ def whatsapp_refresh() -> str:
     """Force a new export (rarely needed: data refreshes by itself every 15 minutes and as soon as
     config/policy.toml changes)."""
     try:
-        return report(refresh())[1]
-    except Exception as exc:  # report, never crash the server
-        return _with_canary(f"Could not refresh: {exc}")
+        return _refreshed()
+    except (ValueError, OSError, sqlite3.Error) as exc:
+        raise _failed(f"Could not refresh: {exc}") from exc
 
 
 # Policy changes: the client should ask the user before each call.
@@ -113,9 +128,9 @@ def _edit(change: Callable[[sqlite3.Connection], str]) -> str:
         ensure_fresh()
         with connect() as conn:
             message = change(conn)
-    except (ValueError, FileNotFoundError) as exc:
-        return _with_canary(str(exc))
-    return f"{message}\n{report(refresh())[1]}"
+    except (ValueError, OSError, sqlite3.Error) as exc:
+        raise _failed(str(exc)) from exc
+    return _refreshed(f"{message}\n")
 
 
 @server.tool(annotations=POLICY_CHANGE, meta=ASK_EVERY_TIME)

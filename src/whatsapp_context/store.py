@@ -32,7 +32,12 @@ REQUIRED = {
     "media": {"Z_PK", "ZTITLE", "ZMEDIALOCALPATH", "ZMETADATA"},
     "group_members": {"Z_PK", "ZCHATSESSION", "ZMEMBERJID", "ZCONTACTNAME"},
 }
-
+# Tables that may be missing from an export, checked only when present (Names and Identities read them).
+OPTIONAL = {
+    "contacts": {"ZFULLNAME", "ZWHATSAPPID", "ZLID"},
+    "push_names": {"ZPUSHNAME", "ZJID"},
+    "lid_accounts": {"ZDISPLAYNAME", "ZIDENTIFIER", "ZPHONENUMBER"},
+}
 
 NO_EXPORT = "No export yet: run uv run wa refresh"
 
@@ -58,9 +63,12 @@ def connect() -> Iterator[sqlite3.Connection]:
 def check_schema(conn: sqlite3.Connection) -> list[str]:
     """Missing tables or columns, as 'table.column' strings (empty when all is well)."""
     missing = []
-    for table, needed in REQUIRED.items():
+    for table, needed in (REQUIRED | OPTIONAL).items():
         present = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
-        missing += [f"{table}.{c}" for c in sorted(needed - present)] if present else [table]
+        if present:
+            missing += [f"{table}.{c}" for c in sorted(needed - present)]
+        elif table in REQUIRED:
+            missing.append(table)
     return missing
 
 
@@ -261,24 +269,27 @@ class Store:
     def search(self, query: str, chat: str | None = None, since: datetime | None = None, limit: int = 50,
                project: str | None = None) -> str:
         """Search content chats; `project` restricts it to one project (substring of its name)."""
-        if chat:
-            pks = [self.find_chat(chat)["Z_PK"]]
-        elif project:
+        by_pk = {r["Z_PK"]: r for r in ([self.find_chat(chat)] if chat else self.content_chats())}
+        if project:
             chosen = self._one_project(project)
-            pks = [r["Z_PK"] for r in self.content_chats() if self.sel.project_of.get(r["ZCONTACTJID"]) == chosen]
-        else:
-            pks = [r["Z_PK"] for r in self.content_chats()]
+            by_pk = {pk: r for pk, r in by_pk.items() if self.sel.project_of.get(r["ZCONTACTJID"]) == chosen}
+            if chat and not by_pk:
+                raise ChatNotFound(f'"{chat}" is not in project "{chosen}".')
+        pks = list(by_pk)
         if not pks or not query.strip():
             return "No results."
         pattern = "%" + query.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
         marks = ",".join("?" * len(pks))
+        limit = max(1, min(limit, 500))
         rows = self.conn.execute(
             self._messages_sql(f"m.ZCHATSESSION IN ({marks}) AND m.ZMESSAGEDATE >= ? "
                                "AND (m.ZTEXT LIKE ? ESCAPE '\\' OR mi.ZTITLE LIKE ? ESCAPE '\\')")
             + " ORDER BY m.ZMESSAGEDATE DESC LIMIT ?",
-            (*pks, to_coredata(since) if since else 0, pattern, pattern, max(1, min(limit, 500)))).fetchall()
-        by_pk = {r["Z_PK"]: r for r in self.content_chats()}
+            (*pks, to_coredata(since) if since else 0, pattern, pattern, limit)).fetchall()
         lines = [f"{self._tagged(by_pk[r['ZCHATSESSION']])} · {line}" for r in rows if (line := self._render(r, {}))]
+        if len(rows) == limit:
+            lines.append(f"(truncated at {plural(limit, 'result')}, most recent first: there are more; narrow "
+                         "with chat/project/since or raise limit)")
         return "\n".join(lines) if lines else "No results."
 
     def inbox(self, hours: int = 24) -> str:
@@ -313,16 +324,26 @@ class Store:
         out += meta_lines or ["(none)"]
         return "\n".join(out)
 
+    def all_chats(self, grep: str = "") -> str:
+        """Every chat not excluded, to write the policy: * marks content. The JID is always shown: a name
+        is third-party text and may look like another chat's JID or phone number."""
+        labels = {jid: self._label(r) for jid, r in self._chats.items()  # third-party names, cleaned
+                  if not is_status(jid) and jid not in self.sel.excluded}
+        lines = [f"{'*' if jid in self.sel.content else ' '} {label} [{jid}]"
+                 for jid, label in sorted(labels.items(), key=lambda kv: (kv[1].casefold(), kv[0]))
+                 if grep.casefold() in label.casefold()]
+        return "\n".join(lines) or "No chat matches."
+
     def chats_overview(self) -> str:
         by_project: dict[str | None, list[str]] = {}
         for row in self.content_chats():
-            kind = "group" if row["ZCONTACTJID"].endswith(GROUP) else "1:1"
+            jid = row["ZCONTACTJID"]
+            kind = "group" if jid.endswith(GROUP) else "1:1"
             first, count = self.conn.execute(
                 "SELECT min(ZMESSAGEDATE), count(*) FROM messages WHERE ZCHATSESSION = ?", (row["Z_PK"],)).fetchone()
-            jid = row["ZCONTACTJID"]
             via = (f" · via {self.sel.via_people[jid]}" if jid in self.sel.via_people else
                    f" · via pattern `{self.sel.via_pattern[jid]}`" if jid in self.sel.via_pattern else "")
-            by_project.setdefault(self.sel.project_of.get(row["ZCONTACTJID"]), []).append(
+            by_project.setdefault(self.sel.project_of.get(jid), []).append(
                 f"- {self.chat_label(row)} ({kind}): {plural(count, 'message')} exported since "
                 f"{fmt(from_coredata(first))}, last {fmt(from_coredata(last_activity(row)))}{via}")
         lines = ["## Chats with allowed content, by project"] if by_project else [

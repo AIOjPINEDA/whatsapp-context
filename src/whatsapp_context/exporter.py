@@ -5,6 +5,7 @@ access to WAExport itself, not to Claude or the terminal that asked for it.
 """
 
 import fcntl
+import hashlib
 import json
 import os
 import sqlite3
@@ -42,14 +43,44 @@ def _prepare_data_dir() -> None:
         real = canonical(Path(os.environ.get(variable) or default))
         if real != canonical(default) and temp not in real.parents:
             raise ExportError(f"{variable} must be {default} or a folder under {temp}, not {os.environ[variable]}.")
-    paths.data_dir().mkdir(mode=0o700, parents=True, exist_ok=True)
+    data = paths.data_dir()
+    data.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if data.is_symlink() or data.lstat().st_uid != os.getuid():
+        raise ExportError(f"{data} must be a folder of your own, not a link or another user's folder.")
+    if data.lstat().st_mode & 0o077:
+        data.chmod(0o700)
 
 
 def _read_json(path: Path) -> dict:
     try:
-        return json.loads(path.read_text())
+        value = json.loads(path.read_text())
     except (OSError, ValueError):
         return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _parse_stamp(value: object) -> datetime | None:
+    """An aware ISO 8601 time, or None for anything else (a damaged status must not crash a view)."""
+    try:
+        moment = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return moment if moment.tzinfo else None
+
+
+def _policy_digest() -> str:
+    """Hash of both policy files' bytes ('' when one cannot be read: then nothing counts as fresh)."""
+    digest = hashlib.sha256()
+    for file in (paths.policy_file(), paths.claude_file(paths.policy_file())):
+        try:
+            digest.update(hashlib.sha256(file.read_bytes() if file.exists() else b"").digest())
+        except OSError:
+            return ""
+    return digest.hexdigest()
+
+
+def _fingerprint(policy_digest: str, jids: object) -> str:
+    return hashlib.sha256(f"{policy_digest}{json.dumps(jids)}".encode()).hexdigest() if policy_digest else ""
 
 
 def run_helper() -> dict:
@@ -74,21 +105,27 @@ def run_helper() -> dict:
 
 
 def _export() -> dict:
+    digest = _policy_digest()  # before loading: an edit made during the export then reads as stale
     policy = load_policy(paths.policy_file())
+    since = to_coredata(datetime.now(UTC) - timedelta(days=policy.days))
+    previous = _read_json(paths.selection_file()).get("jids", [])
+    # Move the cutoff on every export; the chats can only be resolved against the fresh index.
+    paths.write_private(paths.selection_file(), json.dumps({"jids": previous, "since": since}, indent=1))
     status = run_helper()
     if not status.get("ok"):
         return status
     with connect() as conn:
         sel = resolve(conn, policy)
-    since = to_coredata(datetime.now(UTC) - timedelta(days=policy.days))
     wanted = {"jids": sorted(sel.content), "since": since}
-    previous = _read_json(paths.selection_file())
-    paths.write_private(paths.selection_file(), json.dumps(wanted, indent=1))
-    # The export that just ran used the previous selection.
-    if previous.get("jids") != wanted["jids"] or abs(previous.get("since", 0) - since) > 86400:
+    if previous != wanted["jids"]:
+        paths.write_private(paths.selection_file(), json.dumps(wanted, indent=1))
         status = run_helper()
     with connect() as conn:
-        return _with_schema(status, conn)
+        status = _with_schema(status, conn)
+    if status.get("ok"):  # only a complete export under this policy and selection counts as fresh
+        status["fingerprint"] = _fingerprint(digest, wanted["jids"])
+        paths.write_private(paths.status_file(), json.dumps(status, indent=1))
+    return status
 
 
 def _with_schema(status: dict, conn: sqlite3.Connection) -> dict:
@@ -99,23 +136,15 @@ def _with_schema(status: dict, conn: sqlite3.Connection) -> dict:
     return {**status, "ok": False, "error_kind": "schema", "error": "missing " + ", ".join(missing)}
 
 
-def _policy_mtime() -> float:
-    files = (paths.policy_file(), paths.claude_file(paths.policy_file()))
-    return max((f.stat().st_mtime for f in files if f.exists()), default=0)
-
-
 def _is_fresh(status: dict) -> bool:
-    stamp = status.get("exported_at") if status.get("ok") else None
+    stamp = _parse_stamp(status.get("exported_at")) if status.get("ok") else None
     if not stamp or not paths.export_db().exists():
         return False
-    age = datetime.now(UTC) - datetime.fromisoformat(stamp.replace("Z", "+00:00"))
-    if age > timedelta(minutes=STALE_AFTER_MINUTES):
+    if datetime.now(UTC) - stamp > timedelta(minutes=STALE_AFTER_MINUTES):
         return False
-    # A policy edited after the last export may name chats whose messages are not exported yet.
-    try:
-        return _policy_mtime() <= paths.selection_file().stat().st_mtime
-    except FileNotFoundError:
-        return _policy_mtime() == 0
+    # Made under today's policy files, with the selection the last complete export applied.
+    expected = _fingerprint(_policy_digest(), _read_json(paths.selection_file()).get("jids"))
+    return bool(expected) and status.get("fingerprint") == expected
 
 
 @contextmanager
@@ -138,16 +167,16 @@ def refresh(only_if_stale: bool = False) -> dict:
             if only_if_stale and _is_fresh(status):  # another process may have refreshed while we waited
                 return status
             return _export()
-    except (ExportError, subprocess.TimeoutExpired) as exc:
-        return {"ok": False, "error_kind": "helper", "error": str(exc)}
     except ValueError as exc:
         return {"ok": False, "error_kind": "policy", "error": str(exc)}
     except (FileNotFoundError, sqlite3.Error) as exc:  # the helper said ok but its export is unusable
         return {"ok": False, "error_kind": "helper", "error": f"the export is unreadable: {exc}"}
+    except (ExportError, subprocess.TimeoutExpired, OSError) as exc:  # OSError: e.g. an unreadable policy file
+        return {"ok": False, "error_kind": "helper", "error": str(exc)}
 
 
 def ensure_fresh() -> dict:
-    """Refresh when the export is missing, stale or older than either policy file."""
+    """Refresh when the export is missing, stale, failed or made under other policy files."""
     status = _read_json(paths.status_file())
     return status if _is_fresh(status) else refresh(only_if_stale=True)
 
@@ -163,8 +192,8 @@ def caller_can_read_whatsapp(db: Path = paths.WHATSAPP_DB) -> bool:
 
 def describe(status: dict, conn: sqlite3.Connection | None = None) -> str:
     """One line on data freshness for the top of every answer."""
-    exported = status.get("exported_at") or (exported_at(conn) if conn else None)
-    when = fmt(datetime.fromisoformat(exported.replace("Z", "+00:00")).astimezone(LOCAL)) if exported else "never"
+    moment = _parse_stamp(status.get("exported_at") or (exported_at(conn) if conn else None))
+    when = fmt(moment.astimezone(LOCAL)) if moment else "never"
     if status.get("ok"):
         latest = latest_message(conn) if conn else None
         line = f"WhatsApp data as of {when}"
@@ -183,7 +212,7 @@ def describe(status: dict, conn: sqlite3.Connection | None = None) -> str:
 
 
 def report(status: dict) -> tuple[bool, str]:
-    """What `wa status` and whatsapp_refresh show: freshness, counts, policy notes and the canary."""
+    """What `wa status` and whatsapp_refresh show: freshness, counts and policy notes."""
     try:
         with connect() as conn:
             status = _with_schema(status, conn)
@@ -196,6 +225,10 @@ def report(status: dict) -> tuple[bool, str]:
         lines.insert(1, f"{plural(status.get('chats', 0), 'chat')} in the index · "
                         f"{plural(status.get('messages', 0), 'message')} from "
                         f"{plural(status.get('selected', 0), 'content chat')} · SQLite {status.get('sqlite_version')}")
-    if caller_can_read_whatsapp():
-        lines.append(CANARY_WARNING)
     return bool(status.get("ok")), "\n".join(lines)
+
+
+def with_canary(text: str, exposed: bool | None = None) -> str:
+    """Every CLI and MCP answer goes through here: the Full Disk Access warning comes first."""
+    exposed = caller_can_read_whatsapp() if exposed is None else exposed
+    return f"{CANARY_WARNING}\n{text}" if exposed else text

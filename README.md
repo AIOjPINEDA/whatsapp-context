@@ -50,7 +50,8 @@ make setup
 
 `make setup` checks requirements, installs `/Applications/WAExport.app`, creates `config/policy.toml`,
 opens System Settings so **you** switch on Full Disk Access for WAExport (**only** WAExport: never
-Terminal or an AI app) and offers to connect each assistant it finds. It is safe to run again.
+Terminal or an AI app) and offers to connect each assistant it finds. It is safe to run again. If your
+user cannot write to `/Applications`, it asks you to drag WAExport there in Finder.
 
 ## Install with your AI agent
 
@@ -65,11 +66,12 @@ Clone https://github.com/AIOjPINEDA/whatsapp-context into ~/whatsapp-context and
 ## Choose what it can read
 
 As shipped, the assistant reads **no** message text, only chat names, times and unread counts. Find exact
-names with `uv run wa chats --all --grep kitchen`, then edit `config/policy.toml`:
+names with `uv run wa chats --all --grep kitchen` (each chat shows its `[JID]`), then edit
+`config/policy.toml`:
 
 ```toml
 [content]
-chats = ["Book club", "+34 600 000 000"]   # exact names or phone numbers
+chats = ["Book club", "+34 600 000 000"]   # exact names, phone numbers or JIDs
 people = []                                # groups where this person is active
 
 [projects."Kitchen renovation"]
@@ -85,9 +87,14 @@ days = 180
 ```
 
 - Precedence: `exclude` > `chats` > `patterns` > `people`. Case and extra spaces are ignored.
+- A name shared by several chats grants nothing (unless they are one person's phone and linked ID):
+  use the phone number or the JID.
 - Check with `uv run wa status`: it lists `Policy entry with no match` and `Policy conflict` lines.
 - Asking from the chat (*"give access to the group X in project Y"*, *"revoke X"*, *"exclude X"*) writes
-  only to `config/policy-claude.toml` and can never lift your exclusions.
+  only to `config/policy-claude.toml`, by JID with the name as a comment, and can never lift your
+  exclusions. Revoke tells you if another rule still grants the chat.
+- Search returns 50 results, most recent first, and says when it stopped; raise it with
+  `uv run wa search "quote" --limit 200`.
 
 ## Supported assistants
 
@@ -103,7 +110,9 @@ claude.ai and chatgpt.com in the browser need remote servers; this one is local 
 ## Privacy & security
 
 - **Read-only.** WAExport opens WhatsApp's database read-only, has no network and cannot send anything.
-- **Only allowed chats carry text.** Everything else is metadata; `[exclude]` chats are hidden from every tool and `wa` view (their name stays in the local export index).
+- **Only allowed chats carry text.** Everything else is metadata; the index never holds last-message
+  text, drafts or media keys. `[exclude]` chats are hidden from every tool and `wa` view (their name stays
+  in the local export index).
 - **Your assistant's provider receives whatever the assistant reads**, like anything else you show it.
 - **The policy filters the MCP tools, not your account.** An assistant with shell access runs as you and
   could read the export directly. Message text is untrusted: keep tool approvals on.
@@ -112,18 +121,20 @@ Threat model and reporting: [SECURITY.md](SECURITY.md).
 
 ## Update, uninstall, troubleshooting
 
-Update: `git pull` in `~/whatsapp-context`, then `make setup` and restart your assistants.
+Update: `git pull` in `~/whatsapp-context`, then `make setup` and restart your assistants. If the
+[CHANGELOG](CHANGELOG.md) says WAExport changed, re-grant Full Disk Access (see below).
 
 Uninstall: quit Claude Desktop, then `make uninstall`. It removes WAExport, the export and this repo's
-client entries. Then remove WAExport from Full Disk Access and delete the folder.
+client entries; if an entry cannot be removed it says so, exits with an error and keeps WAExport and the export.
+Then remove WAExport from Full Disk Access and delete the folder.
 
 | You see | Do this |
 |---|---|
 | `WAExport has no Full Disk Access` | System Settings > Privacy & Security > Full Disk Access: add `/Applications/WAExport.app`, then `uv run wa refresh` |
 | It stopped working after an update | WAExport is signed ad hoc, so a new build loses the grant: remove it (-) and add it again (+) |
 | `(is WhatsApp open on this Mac?)` | Open WhatsApp for Mac and let it sync |
-| `Policy entry with no match` | Copy the exact name from `uv run wa chats --all`; if *ambiguous*, use the phone number |
-| `WARNING: the process running this tool ...` | Remove Full Disk Access from that app; only WAExport should have it |
+| `Policy entry with no match` | Copy the exact name from `uv run wa chats --all`; if *ambiguous*, use the phone number or `[JID]` |
+| `WARNING: the process running this tool ...` (always the first line) | Remove Full Disk Access from that app; only WAExport should have it |
 | Wrong time zone | Set `WA_TZ`, e.g. `Europe/Madrid` |
 
 ## FAQ
@@ -133,6 +144,7 @@ client entries. Then remove WAExport from Full Disk Access and delete the folder
 - **Windows, Linux, iPhone or Android?** No. macOS with WhatsApp for Mac only.
 - **Will a WhatsApp update break it?** Possibly; `uv run wa status` names what changed.
 - **Can the assistant grant itself more chats?** Only with `whatsapp_allow`, which your client should ask you to approve each time.
+- **Can it find a chat the inbox no longer shows?** Yes: `whatsapp_chats` with `all` (and `grep`) lists every chat.
 
 ## License
 

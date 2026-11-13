@@ -71,6 +71,12 @@ func columns(_ db: OpaquePointer?, _ schema: String, _ table: String) -> Set<Str
     return result
 }
 
+/// Column list of `main.table` with the `redacting` columns projected as NULL, so their values are never written.
+func projection(_ db: OpaquePointer?, _ table: String, redacting: Set<String>) -> String {
+    columns(db, "main", table).sorted().map { redacting.contains($0) ? "NULL AS \"\($0)\"" : "\"\($0)\"" }
+        .joined(separator: ", ")
+}
+
 func require(_ db: OpaquePointer?, _ schema: String, _ table: String, _ needed: [String]) throws {
     let missing = Set(needed).subtracting(columns(db, schema, table))
     if !missing.isEmpty {
@@ -162,20 +168,14 @@ func export(source: String, data: String) throws -> [String: Any] {
     defer { if !renamed { unlink(tmp) } }
     try run(mem, "ATTACH ? AS out", [tmp])
     try exec(mem, "BEGIN")
-    try exec(mem, "CREATE TABLE out.chats AS SELECT * FROM main.ZWACHATSESSION")
-    // The index covers every chat, so it must not carry message text or drafts.
-    let chatColumns = columns(mem, "out", "chats")
-    for column in ["ZLASTMESSAGETEXT", "ZSAVEDINPUT"] where chatColumns.contains(column) {
-        try exec(mem, "UPDATE out.chats SET \(column) = NULL")
-    }
+    // The index covers every chat, so message text and drafts are never written, not even to freed pages.
     // Pinned chats carry a far-future ZLASTMESSAGEDATE (it drives sorting), so keep the real one.
-    try exec(mem, "ALTER TABLE out.chats ADD COLUMN last_message_date REAL")
-    if chatColumns.contains("ZLASTMESSAGE") {
-        try exec(mem, """
-            UPDATE out.chats SET last_message_date =
-                (SELECT ZMESSAGEDATE FROM main.ZWAMESSAGE WHERE ZWAMESSAGE.Z_PK = out.chats.ZLASTMESSAGE)
-            """)
-    }
+    let lastDate = columns(mem, "main", "ZWACHATSESSION").contains("ZLASTMESSAGE")
+        ? "(SELECT m.ZMESSAGEDATE FROM main.ZWAMESSAGE m WHERE m.Z_PK = c.ZLASTMESSAGE)" : "CAST(NULL AS REAL)"
+    try exec(mem, """
+        CREATE TABLE out.chats AS SELECT \(projection(mem, "ZWACHATSESSION", redacting: ["ZLASTMESSAGETEXT", "ZSAVEDINPUT"])),
+            \(lastDate) AS last_message_date FROM main.ZWACHATSESSION c
+        """)
     for (table, source) in [("group_members", "ZWAGROUPMEMBER"), ("push_names", "ZWAPROFILEPUSHNAME")]
     where !columns(mem, "main", source).isEmpty {
         try exec(mem, "CREATE TABLE out.\(table) AS SELECT * FROM main.\(source)")
@@ -191,11 +191,16 @@ func export(source: String, data: String) throws -> [String: Any] {
         WHERE ZMESSAGEDATE >= ?2 AND ZCHATSESSION IN (
             SELECT Z_PK FROM main.ZWACHATSESSION WHERE ZCONTACTJID IN (SELECT value FROM json_each(?1)))
         """, [jidsJSON, selection.since])
-    try exec(mem, "CREATE TABLE out.media AS SELECT * FROM main.ZWAMEDIAITEM WHERE ZMESSAGE IN (SELECT Z_PK FROM out.messages)")
     // CDN URL + key would let anyone fetch and decrypt the attachment.
-    let mediaColumns = columns(mem, "out", "media")
-    for column in ["ZMEDIAURL", "ZMEDIAKEY"] where mediaColumns.contains(column) {
-        try exec(mem, "UPDATE out.media SET \(column) = NULL")
+    try exec(mem, """
+        CREATE TABLE out.media AS SELECT \(projection(mem, "ZWAMEDIAITEM", redacting: ["ZMEDIAURL", "ZMEDIAKEY"]))
+        FROM main.ZWAMEDIAITEM WHERE ZMESSAGE IN (SELECT Z_PK FROM out.messages)
+        """)
+    // CREATE TABLE AS drops indexes; these serve the store's per-chat queries and joins.
+    try exec(mem, "CREATE INDEX out.messages_chat_date ON messages (ZCHATSESSION, ZMESSAGEDATE)")
+    try exec(mem, "CREATE INDEX out.media_pk ON media (Z_PK)")
+    if columns(mem, "out", "group_members").contains("Z_PK") {
+        try exec(mem, "CREATE INDEX out.group_members_pk ON group_members (Z_PK)")
     }
     try exec(mem, "CREATE TABLE out.meta (key TEXT PRIMARY KEY, value TEXT)")
     let exportedAt = ISO8601DateFormatter().string(from: Date())
