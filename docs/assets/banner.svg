@@ -2,7 +2,7 @@
      width="1280" height="640" viewBox="0 0 1280 640" role="img"
      aria-labelledby="banner-title banner-description">
   <title id="banner-title">whatsapp-context</title>
-  <desc id="banner-description">Your chats. Your call. Read-only WhatsApp context for AI assistants.</desc>
+  <desc id="banner-description">Your chats. Your call. Read-only WhatsApp access for AI agents.</desc>
   <style>
     @font-face {
       font-family: 'Barlow Condensed';
@@ -41,8 +41,8 @@
     <text x="59" y="369" fill="#bafa82">Your call.</text>
   </g>
   <text class="mono" x="64" y="432" fill="#efe5cc" font-size="23">
-    <tspan x="64">Read-only WhatsApp context</tspan>
-    <tspan x="64" dy="32">for AI assistants.</tspan>
+    <tspan x="64">Read-only WhatsApp access</tspan>
+    <tspan x="64" dy="32">for AI agents.</tspan>
   </text>
   <path fill="#efb96b" d="M64 580h7v7h-7z"/>
   <text class="mono" x="83" y="590" fill="#efe5cc" font-size="18" letter-spacing="1.6">macOS / MCP</text>
