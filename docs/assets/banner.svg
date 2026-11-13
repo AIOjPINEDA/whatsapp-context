@@ -36,9 +36,9 @@
   <path fill="none" stroke="#bafa82" d="M48 105v16m-8-8h16m1176-8v16m-8-8h16M48 549v16m-8-8h16m1176-8v16m-8-8h16"/>
   <image x="58" y="58" width="38" height="38" xlink:href="logo.svg"/>
   <text class="mono" x="109" y="84" fill="#efe5cc" font-size="22">whatsapp-context</text>
-  <g class="headline" fill="#efe5cc" font-size="136">
-    <text x="59" y="259">Your chats</text>
-    <text x="59" y="369" fill="#bafa82">Your call</text>
+  <g class="headline" fill="#efe5cc" font-size="118">
+    <text x="59" y="259">Chat history</text>
+    <text x="59" y="369" fill="#bafa82">Fresh context</text>
   </g>
   <text class="mono" x="64" y="432" fill="#efe5cc" font-size="23">
     <tspan x="64">Read-only WhatsApp access</tspan>
