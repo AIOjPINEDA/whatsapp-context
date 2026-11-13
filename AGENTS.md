@@ -10,14 +10,14 @@ served over MCP (stdio) to local assistants.
 
 | Path | What it is |
 |---|---|
-| `helper/main.swift` | **WAExport**, the only code with Full Disk Access: read-only snapshot into `~/.local/share/whatsapp-context/wa.sqlite`. Changing it forces every user to re-grant Full Disk Access. |
+| `helper/main.swift` | **WAExport**, the only code with Full Disk Access: read-only snapshot into `~/.local/share/whatsapp-context/wa.sqlite`. Changing it, its `Info.plist` or its build flags forces every user to re-grant Full Disk Access. |
 | `src/whatsapp_context/exporter.py` | Runs WAExport via `open`, keeps the export fresh, status `report()`, Full Disk Access canary. |
 | `src/whatsapp_context/policy.py` | Parses and validates `config/policy.toml` + `config/policy-claude.toml`; resolves chats. |
 | `src/whatsapp_context/policy_edit.py` | `whatsapp_allow` / `revoke` / `exclude`: writes JIDs to `config/policy-claude.toml` only, under a file lock. |
 | `src/whatsapp_context/store.py` | Read-only queries on the export and all text output. |
 | `src/whatsapp_context/text.py` · `paths.py` | Dates and decoding · locations and private writes. |
 | `src/whatsapp_context/mcp_server.py` · `cli.py` | MCP server (8 tools) · `wa` CLI. |
-| `scripts/setup.sh` · `scripts/register.py` | `make setup` (bash 3.2) · client registration and `remove`. |
+| `scripts/setup.sh` · `grant.sh` · `register.py` | `make setup` (bash 3.2) · `make grant`, the Full Disk Access step · client registration and `remove`. |
 | `tests/` | pytest on a synthetic WhatsApp container; `test_guards.py` holds the ratchets. |
 | `docs/` | GitHub Pages site (`index.html`, one file, no external requests); `assets/banner.png` is rendered from `banner.svg`. |
 
@@ -52,8 +52,10 @@ make test
 - Python >= 3.12 with `uv`; one runtime dependency (`mcp`, pinned). PEP 8, type hints, public docstrings.
 - Modules use only each other's public names. Everything user-facing is in English; translations are
   separate files (`README.es.md`). Policy keys are English.
-- Semantic commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`). A helper change says in
-  the PR that users must re-grant Full Disk Access.
+- Semantic commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`). Anything that changes the
+  built WAExport (`helper/main.swift`, `helper/Info.plist`, the Makefile build rule or its flags) is a
+  helper change: the PR and the CHANGELOG say users must re-grant Full Disk Access (`make grant`).
+- The helper is built with `-target <arch>-apple-macos<LSMinimumSystemVersion>`; `tests/test_build.py` checks it.
 
 ## Quality profile (ISO/IEC 25010:2023)
 

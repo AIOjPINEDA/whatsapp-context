@@ -11,7 +11,7 @@
 import Foundation
 import SQLite3
 
-let helperVersion = "0.1.0"
+let helperVersion = "0.2.1"
 let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 struct Failure: Error {

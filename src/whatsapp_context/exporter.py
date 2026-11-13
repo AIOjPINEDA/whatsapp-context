@@ -100,6 +100,8 @@ def run_helper() -> dict:
     status = _read_json(paths.status_file())
     if status.get("run") != run_id:
         detail = (proc.stderr or "").strip()[:300]
+        if "-10825" in detail:  # LaunchServices: the app needs a newer macOS than this one
+            raise ExportError(f"WAExport was built for a newer macOS (error -10825): run `make setup` in {paths.REPO}.")
         raise ExportError(f"WAExport did not answer (exit code {proc.returncode}). {detail}".strip())
     return status
 
@@ -204,7 +206,7 @@ def describe(status: dict, conn: sqlite3.Connection | None = None) -> str:
         return line + "."
     error = status.get("error", "unknown error")
     hint = {
-        "fda_denied": "WAExport has no Full Disk Access (System Settings > Privacy & Security > Full Disk Access)",
+        "fda_denied": f"WAExport has no Full Disk Access: run `make grant` in {paths.REPO}",
         "source_missing": f"WhatsApp for Mac data not found: {error}",
         "schema": f"WhatsApp changed its database: {error}; store.py needs adapting",
     }.get(status.get("error_kind", ""), error)

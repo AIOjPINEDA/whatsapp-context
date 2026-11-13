@@ -53,6 +53,10 @@ abre Ajustes del Sistema para que **tú** actives el Acceso total al disco de WA
 nunca Terminal ni una app de IA) y ofrece conectar cada asistente que encuentre. Puedes repetirlo sin miedo.
 Si tu usuario no puede escribir en `/Applications`, te pide arrastrar WAExport allí en Finder.
 
+macOS nunca deja que una app pida el Acceso total al disco, así que ese interruptor es tuyo: arrastra
+WAExport desde la ventana de Finder que se abre hasta la lista y actívalo. El instalador lo detecta solo y
+continúa. Para repetir solo este paso (tras una actualización, por ejemplo), ejecuta `make grant`.
+
 ## Instalación con tu agente de IA
 
 Pega esto en Claude Code, Codex o cualquier agente que pueda ejecutar comandos en tu Mac:
@@ -130,8 +134,9 @@ Después quita WAExport del Acceso total al disco y borra la carpeta.
 
 | Si ves | Haz esto |
 |---|---|
-| `WAExport has no Full Disk Access` | Ajustes del Sistema > Privacidad y seguridad > Acceso total al disco: añade `/Applications/WAExport.app` y ejecuta `uv run wa refresh` |
+| `WAExport has no Full Disk Access` | `make grant`: abre la lista y Finder, y espera a que actives WAExport |
 | Dejó de funcionar tras actualizar | WAExport va firmado ad hoc y una compilación nueva pierde el permiso: quítalo (-) y vuelve a añadirlo (+) |
+| *No se puede usar esta versión de la aplicación «WAExport» con esta versión de macOS* (en inglés: *You can't use this version…*) o `error -10825` | Compilado antes de la 0.2.1: `git pull` y luego `make setup` |
 | `(is WhatsApp open on this Mac?)` | Abre WhatsApp para Mac y deja que sincronice |
 | `Policy entry with no match` | Copia el nombre exacto de `uv run wa chats --all`; si pone *ambiguous*, usa el teléfono o el `[JID]` |
 | `WARNING: the process running this tool ...` (siempre la primera línea) | Quita el Acceso total al disco a esa app; solo WAExport debe tenerlo |

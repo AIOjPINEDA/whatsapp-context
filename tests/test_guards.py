@@ -19,10 +19,11 @@ from whatsapp_context.policy import parse_policy
 LINE_CEILINGS = {
     "helper/main.swift": 297,
     "scripts/register.py": 199,
-    "scripts/setup.sh": 135,
+    "scripts/grant.sh": 50,
+    "scripts/setup.sh": 112,
     "src/whatsapp_context/__init__.py": 0,
     "src/whatsapp_context/cli.py": 71,
-    "src/whatsapp_context/exporter.py": 234,
+    "src/whatsapp_context/exporter.py": 236,
     "src/whatsapp_context/mcp_server.py": 158,
     "src/whatsapp_context/paths.py": 46,
     "src/whatsapp_context/policy.py": 280,
