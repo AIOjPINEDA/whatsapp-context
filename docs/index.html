@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>whatsapp-context · Your WhatsApp as read-only AI context</title>
+<meta name="description" content="Give your local AI assistant read-only access to the WhatsApp chats you choose. Runs on your Mac. It can't send anything.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://aiojpineda.github.io/whatsapp-context/">
+<meta property="og:title" content="whatsapp-context · Your WhatsApp as read-only AI context">
+<meta property="og:description" content="Your WhatsApp, as read-only context for your AI. Runs on your Mac.">
+<meta property="og:image" content="https://aiojpineda.github.io/whatsapp-context/assets/banner.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta property="og:image:alt" content="whatsapp-context: your WhatsApp, as read-only context for your AI">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://aiojpineda.github.io/whatsapp-context/assets/banner.png">
+<style>
+:root{--bg:#fff;--fg:#111827;--mu:#4b5563;--ln:#e5e7eb;--cd:#f6f8f7;--ac:#0f766e;--fo:#0f766e}
+@media (prefers-color-scheme:dark){:root{--bg:#0b1210;--fg:#e5e7eb;--mu:#9ca3af;--ln:#1f2a27;--cd:#121c19;--ac:#5eead4;--fo:#5eead4}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+.w{max-width:44rem;margin:0 auto;padding:0 16px}
+a{color:var(--ac)}
+:focus-visible{outline:2px solid var(--fo);outline-offset:2px;border-radius:4px}
+header .w{display:flex;align-items:center;gap:12px;padding-block:16px}
+.brand{display:flex;align-items:center;gap:8px;font-weight:700;color:var(--fg);text-decoration:none;margin-right:auto}
+nav{display:flex;gap:16px;align-items:center;font-size:.9rem}
+nav a{color:var(--mu);text-decoration:none}
+nav a:hover{color:var(--fg)}
+button{font:inherit;cursor:pointer}
+.lang{background:none;border:1px solid var(--mu);color:var(--mu);border-radius:6px;padding:2px 8px}
+.lang:hover{color:var(--fg)}
+section{padding-block:32px;border-top:1px solid var(--ln)}
+.hero{border:0;padding-block:56px 40px}
+h1{font-size:clamp(1.9rem,6vw,2.75rem);line-height:1.15;margin:0 0 12px;letter-spacing:-.02em}
+h2{font-size:1.15rem;margin:0 0 16px}
+.sub{color:var(--mu);font-size:1.1rem;margin:0 0 24px}
+.btn{display:inline-block;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600;background:#0f766e;color:#fff;transition:background .15s}
+.btn:hover{background:#115e59}
+.pl{display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr));gap:16px;list-style:none;margin:0;padding:0}
+.pl b{display:block}
+.pl span{color:var(--mu);font-size:.95rem}
+.cmd{display:flex;align-items:flex-start;gap:8px;background:var(--cd);border:1px solid var(--ln);border-radius:8px;padding:10px 12px;margin:0 0 8px}
+.cmd code{flex:1;font:.88rem/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+.cp{background:none;border:1px solid var(--mu);border-radius:6px;color:var(--mu);font-size:.8rem;padding:2px 8px;transition:color .15s,border-color .15s}
+.cp:hover{color:var(--fg);border-color:var(--mu)}
+h3{font-size:.95rem;margin:20px 0 8px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}
+.chips li{border:1px solid var(--ln);border-radius:999px;padding:4px 12px;font-size:.9rem}
+footer{border-top:1px solid var(--ln);color:var(--mu);font-size:.85rem;padding-block:24px 40px}
+footer p{margin:0 0 8px}
+footer a{color:var(--mu)}
+.sr{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+</style>
+</head>
+<body>
+<header><div class="w">
+<a class="brand" href="./"><img src="assets/logo.svg" width="28" height="28" alt="">whatsapp-context</a>
+<nav aria-label="Main">
+<a href="https://github.com/AIOjPINEDA/whatsapp-context">GitHub</a>
+<button class="lang" id="lang" type="button" hidden aria-label="Leer en español">ES</button>
+</nav>
+</div></header>
+<main class="w">
+<section class="hero">
+<h1 data-i18n="h1">Your WhatsApp, as read‑only context for your AI.</h1>
+<p class="sub" data-i18n="sub">Runs on your Mac. You choose the chats. It can't send anything.</p>
+<a class="btn" href="#install" data-i18n="bi">Install</a>
+</section>
+<section aria-labelledby="why">
+<h2 id="why" class="sr" data-i18n="why">Why it's safe</h2>
+<ul class="pl">
+<li><b data-i18n="p1">Read-only</b><span data-i18n="p1d">Reads a local copy. Never writes to WhatsApp.</span></li>
+<li><b data-i18n="p2">You choose the chats</b><span data-i18n="p2d">No message text until you allow it.</span></li>
+<li><b data-i18n="p3">Never sends</b><span data-i18n="p3d">No sending, no automation, ever.</span></li>
+</ul>
+</section>
+<section id="install" aria-labelledby="ih">
+<h2 id="ih" data-i18n="ih">Install</h2>
+<div class="cmd"><code>git clone https://github.com/AIOjPINEDA/whatsapp-context.git ~/whatsapp-context</code><button class="cp" type="button" hidden>Copy</button></div>
+<div class="cmd"><code>cd ~/whatsapp-context</code><button class="cp" type="button" hidden>Copy</button></div>
+<div class="cmd"><code>make setup</code><button class="cp" type="button" hidden>Copy</button></div>
+<h3 data-i18n="ag">Or with your AI agent</h3>
+<div class="cmd"><code data-i18n="pr">Clone https://github.com/AIOjPINEDA/whatsapp-context into ~/whatsapp-context and follow its INSTALL.md step by step. Ask me before every step that needs my action.</code><button class="cp" type="button" hidden>Copy</button></div>
+</section>
+<section aria-labelledby="wh">
+<h2 id="wh" data-i18n="wh">Works with</h2>
+<ul class="chips"><li>Claude Code</li><li>Claude Desktop</li><li>ChatGPT for Mac</li><li>Codex</li><li data-i18n="any">Any local MCP client</li></ul>
+</section>
+</main>
+<footer><div class="w">
+<p><span data-i18n="hon">Your assistant's provider sees what it reads. Nothing else leaves your Mac.</span></p>
+<p><span data-i18n="req">Requires</span> macOS 14+, WhatsApp for Mac, Xcode Command Line Tools, uv.</p>
+<p><a href="https://github.com/AIOjPINEDA/whatsapp-context#readme">README</a> · <a href="https://github.com/AIOjPINEDA/whatsapp-context/blob/main/INSTALL.md">INSTALL.md</a> · <a href="https://github.com/AIOjPINEDA/whatsapp-context/blob/main/SECURITY.md">SECURITY.md</a> · <a href="https://github.com/AIOjPINEDA/whatsapp-context/blob/main/README.es.md" lang="es">Español</a></p>
+<p>MIT · <span data-i18n="na">Not affiliated with WhatsApp or Meta.</span></p>
+</div></footer>
+<div class="sr" aria-live="polite" id="live"></div>
+<script>
+(()=>{
+const ES={h1:"Tu WhatsApp, como contexto de solo lectura para tu IA.",sub:"Funciona en tu Mac. Tú eliges los chats. No puede enviar nada.",bi:"Instalar",why:"Por qué es seguro",p1:"Solo lectura",p1d:"Lee una copia local. Nunca escribe en WhatsApp.",p2:"Tú eliges los chats",p2d:"Ningún texto de mensaje hasta que lo permitas.",p3:"Nunca envía",p3d:"Sin envíos ni automatización. Nunca.",ih:"Instalar",ag:"O con tu agente de IA",pr:"Clona https://github.com/AIOjPINEDA/whatsapp-context en ~/whatsapp-context y sigue su INSTALL.md paso a paso. Pregúntame antes de cada paso que necesite mi acción.",wh:"Funciona con",any:"Cualquier cliente MCP local",hon:"El proveedor de tu asistente ve lo que lee. Nada más sale de tu Mac.",req:"Requiere",na:"Sin relación con WhatsApp ni Meta.",title:"whatsapp-context · Tu WhatsApp como contexto de solo lectura para tu IA",desc:"Da a tu asistente de IA local acceso de solo lectura a los chats de WhatsApp que elijas. Funciona en tu Mac. No puede enviar nada.",copy:"Copiar",copied:"Copiado",nav:"Principal",tog:"Read in English"};
+const EN={copy:"Copy",copied:"Copied",nav:"Main",tog:"Leer en español"};
+const els=document.querySelectorAll("[data-i18n]"),md=document.querySelector('meta[name=description]'),nav=document.querySelector("nav");
+els.forEach(e=>EN[e.dataset.i18n]=e.textContent);EN.title=document.title;EN.desc=md.content;
+let T=EN;const live=document.getElementById("live"),lb=document.getElementById("lang"),cps=document.querySelectorAll(".cp");
+function set(l){T=l==="es"?ES:EN;document.documentElement.lang=l;els.forEach(e=>e.textContent=T[e.dataset.i18n]);document.title=T.title;md.content=T.desc;nav.setAttribute("aria-label",T.nav);lb.textContent=l==="es"?"EN":"ES";lb.setAttribute("aria-label",T.tog);cps.forEach(b=>b.textContent=T.copy)}
+let s=null;try{s=localStorage.getItem("lang")}catch(_){}
+set(s||(/^es\b/i.test(navigator.language||"")?"es":"en"));
+lb.hidden=false;lb.onclick=()=>{const l=document.documentElement.lang==="es"?"en":"es";set(l);try{localStorage.setItem("lang",l)}catch(_){}};
+if(navigator.clipboard)cps.forEach(b=>{b.hidden=false;let t;b.onclick=async()=>{const c=b.previousElementSibling;try{await navigator.clipboard.writeText(c.textContent)}catch(_){getSelection().selectAllChildren(c);return}clearTimeout(t);b.textContent=live.textContent=T.copied;t=setTimeout(()=>{b.textContent=T.copy;live.textContent=""},1500)}});
+})();
+</script>
+</body>
+</html>

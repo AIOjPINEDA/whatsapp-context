@@ -1,0 +1,28 @@
+# Never commit WhatsApp data, exports or the personal policy
+.local/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+media/
+config/*
+!config/policy.example.toml
+selection.json
+status.json
+*.tmp
+*.bak*
+.env
+
+# Python / build
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+build/
+
+# Local overrides
+CLAUDE.local.md
+.agents.md
+.claude/settings.local.json
+.DS_Store

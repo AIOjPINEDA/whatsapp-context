@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640" role="img" aria-label="whatsapp-context: your WhatsApp, as read-only context for your AI">
+<rect width="1280" height="640" fill="#0b1513"/>
+<g transform="translate(576 150) scale(2)"><path fill="#14b8a6" d="M14 6h36a10 10 0 0 1 10 10v24a10 10 0 0 1-10 10H28l-12 9v-9h-2A10 10 0 0 1 4 40V16A10 10 0 0 1 14 6z"/><g fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round"><circle cx="21" cy="28" r="7"/><circle cx="43" cy="28" r="7"/><path d="M28 27q4-3 8 0"/></g></g>
+<g font-family="-apple-system,BlinkMacSystemFont,'Helvetica Neue',Helvetica,Arial,sans-serif" text-anchor="middle">
+<text x="640" y="378" font-size="64" font-weight="700" fill="#f0fdfa">whatsapp-context</text>
+<text x="640" y="446" font-size="32" fill="#99f6e4">Your WhatsApp, as read-only context for your AI.</text>
+<text x="640" y="500" font-size="24" fill="#5eead4" fill-opacity=".8">Runs on your Mac · You choose the chats · Never sends</text>
+</g>
+</svg>

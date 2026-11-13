@@ -1,0 +1,42 @@
+# whatsapp-context policy: which WhatsApp chats your AI assistant may read.
+#
+# `make setup` copies this file to config/policy.toml (ignored by git). Edit that copy, not this one.
+# As shipped, it grants NO message text: the assistant only sees chat names, times and unread counts.
+#
+# Names must match WhatsApp exactly (case and extra spaces are ignored). A phone number with country
+# code also works, e.g. "+34 600 000 000". To list the exact names:
+#   uv run wa chats --all --grep <text>
+# Then check the result with:
+#   uv run wa status
+#
+# Precedence: [exclude] > explicit chats > patterns > people.
+
+[content]
+# Chats whose message text the assistant may read, outside any project.
+chats = []
+# e.g. chats = ["Book club", "+34 600 000 000"]
+
+# Every group where one of these people is an active member is readable too
+# (use the name of their one-to-one chat, or their phone number).
+people = []
+
+# Projects: their chats are readable, and the assistant knows which project (and which context
+# folder or file) each chat belongs to, so it keeps one project per session.
+# Uncomment and adapt; project names go in quotes and may contain spaces.
+#
+# [projects."Kitchen renovation"]
+# context = "~/Documents/Projects/Kitchen"   # a folder (its README.md is read) or a file
+# repo = "~/dev/kitchen-planner"              # optional
+# chats = ["Kitchen renovation crew"]
+# people = []
+# # Regular expressions (case-insensitive) on the chat name; new chats that match join automatically.
+# # Use single quotes so backslashes need no escaping.
+# patterns = ['^Kitchen ']
+
+[exclude]
+# Never shown, not even as metadata in the inbox. Wins over everything above.
+chats = []
+
+[options]
+# Days of history exported for readable chats.
+days = 180
