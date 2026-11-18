@@ -154,8 +154,9 @@ class Store:
         self._chats = {chat["ZCONTACTJID"]: chat for chat in chat_rows(conn)}
         labels = Counter(self._label(self._chats[j]) for j in self.sel.content if j in self._chats)
         self._repeated = {label for label, n in labels.items() if n > 1}
-        self.transcripts = transcripts.load()
-        conn.create_function("transcript", 1, lambda pk: (row := self.transcripts.get(pk)) and row["text"],
+        cache = transcripts.load()
+        self.transcript = lambda pk, stanza: transcripts.lookup(cache, pk, stanza)
+        conn.create_function("transcript", 2, lambda pk, stanza: (row := self.transcript(pk, stanza)) and row["text"],
                              deterministic=True)
 
     def _label(self, row: dict) -> str:
@@ -201,7 +202,7 @@ class Store:
             text = clean(row["media_title"])
         elif mtype == AUDIO:
             parts.append(self._audio(row))
-            if (cached := self.transcripts.get(row["Z_PK"])) and cached["text"]:
+            if (cached := self.transcript(row["Z_PK"], row["ZSTANZAID"])) and cached["text"]:
                 text = clean(cached["text"])
         elif label:
             parts.append(f"[{label}]")
@@ -221,7 +222,7 @@ class Store:
         """Voice-note label: its length and whether a transcript (third-party speech, machine-made) exists."""
         seconds = int(row["media_seconds"] or 0)
         length = f" {seconds // 60}:{seconds % 60:02d}" if seconds else ""
-        cached = self.transcripts.get(row["Z_PK"])
+        cached = self.transcript(row["Z_PK"], row["ZSTANZAID"])
         if cached:
             if not cached["text"]:
                 return f"[audio{length} · transcribed: no speech detected]"
@@ -235,9 +236,10 @@ class Store:
         """Voice notes of one content chat, most recent first."""
         row = self.find_chat(chat)
         return self.conn.execute(
-            "SELECT m.Z_PK, mi.ZMEDIALOCALPATH AS media_path, mi.ZMOVIEDURATION AS media_seconds FROM messages m "
-            "LEFT JOIN media mi ON mi.Z_PK = m.ZMEDIAITEM WHERE m.ZCHATSESSION = ? AND m.ZMESSAGETYPE = ? "
-            "AND m.ZMESSAGEDATE >= ? AND m.ZMESSAGEDATE < ? ORDER BY m.ZMESSAGEDATE DESC LIMIT ?",
+            "SELECT m.Z_PK, m.ZSTANZAID, mi.ZMEDIALOCALPATH AS media_path, mi.ZMOVIEDURATION AS media_seconds "
+            "FROM messages m LEFT JOIN media mi ON mi.Z_PK = m.ZMEDIAITEM "
+            "WHERE m.ZCHATSESSION = ? AND m.ZMESSAGETYPE = ? AND m.ZMESSAGEDATE >= ? "
+            "AND m.ZMESSAGEDATE < ? ORDER BY m.ZMESSAGEDATE DESC LIMIT ?",
             (row["Z_PK"], AUDIO, to_coredata(since) if since else 0, to_coredata(until) if until else 1e12,
              max(1, min(limit, 100)))).fetchall()
 
@@ -317,7 +319,7 @@ class Store:
         rows = self.conn.execute(
             self._messages_sql(f"m.ZCHATSESSION IN ({marks}) AND m.ZMESSAGEDATE >= ? "
                                "AND (m.ZTEXT LIKE ? ESCAPE '\\' OR mi.ZTITLE LIKE ? ESCAPE '\\' "
-                               "OR transcript(m.Z_PK) LIKE ? ESCAPE '\\')")
+                               "OR transcript(m.Z_PK, m.ZSTANZAID) LIKE ? ESCAPE '\\')")
             + " ORDER BY m.ZMESSAGEDATE DESC LIMIT ?",
             (*pks, to_coredata(since) if since else 0, pattern, pattern, pattern, limit)).fetchall()
         lines = [f"{self._tagged(by_pk[r['ZCHATSESSION']])} · {line}" for r in rows if (line := self._render(r, {}))]

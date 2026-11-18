@@ -17,7 +17,10 @@ assistants **before** adding `transcribe` to the policy: a server still running 
   It needs Command Line Tools 26 or later; with older ones `make build` skips it and builds the rest.
 - WAExport checks both ends of every copy on the open file (`F_GETPATH`), so a folder swapped for a link
   cannot make it read outside WhatsApp's container or write outside `audio/`; it never waits on a FIFO
-  and stops within 120 s. Transcriptions run one at a time, and a revoke exported meanwhile wins.
+  and writes nothing after 100 s. It reads only from WhatsApp's own container (pinned by descriptor), and
+  never more than 16 MB per note. Transcriptions run one at a time, and a revoke exported meanwhile wins.
+- A transcript belongs to one message (its ID and stanza ID): a restored database reusing an ID does not
+  inherit another chat's text.
 - Messages show a voice note's length and whether it is transcribed, not downloaded or pending; search
   also looks inside transcripts.
 - WAExport reports version 0.3.0.

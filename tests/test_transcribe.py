@@ -187,3 +187,14 @@ def test_a_revoke_during_transcription_wins(voice_env, monkeypatch):
     with pytest.raises(LookupError):  # the chat is gone by the time the answer is rendered
         exporter.transcribe("Grupo Proyecto")
     assert transcripts.load() == {}
+
+
+def test_a_reused_message_id_does_not_inherit_a_transcript(voice_env):
+    voice(voice_env, 20, 1, "Media/111/nota.opus")
+    exporter.transcribe("Grupo Proyecto")
+    voice_env["writer"].execute("UPDATE ZWAMESSAGE SET ZSTANZAID = 'OTHER' WHERE Z_PK = 20")  # a restored database
+    voice_env["writer"].commit()
+    assert exporter.refresh()["ok"]
+    assert transcripts.load() == {}
+    with connect() as conn:
+        assert "[audio 0:23 · not transcribed]" in Store(conn).messages("Grupo Proyecto")

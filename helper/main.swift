@@ -225,7 +225,15 @@ func export(source: String, data: String) throws -> [String: Any] {
 /// so a forged request cannot reach other chats. Only .opus/.m4a, regular files up to 16 MB, never symlinks.
 func copyAudio(source: String, data: String) throws -> [String: Any] {
     struct Request: Decodable { var pks: [Int64] = [] }
-    let chatStorage = source + "/ChatStorage.sqlite"
+    let deadline = Date().addingTimeInterval(100)  // no copy is written after this (the caller waits 180 s)
+    // The container is pinned by descriptor first; every note must really be inside it when opened.
+    let container = open(source, O_RDONLY | O_DIRECTORY)
+    guard container >= 0 else { throw Failure(kind: "open", message: "\(source): not found") }
+    defer { close(container) }
+    guard let root = realPath(container).map({ $0 + "/" }), sourceAllowed(root) else {
+        throw Failure(kind: "open", message: "\(source) is not WhatsApp's container")
+    }
+    let chatStorage = root + "ChatStorage.sqlite"
     try preflight(chatStorage)
     var mem: OpaquePointer?
     defer { sqlite3_close(mem) }
@@ -250,11 +258,7 @@ func copyAudio(source: String, data: String) throws -> [String: Any] {
           (real as NSString).lastPathComponent == "audio" else {
         throw Failure(kind: "write", message: "\(dir) is not inside the data folder")
     }
-    guard let resolved = realpath(source, nil) else { throw Failure(kind: "open", message: "\(source): not found") }
-    let root = String(cString: resolved) + "/"  // realpath, like F_GETPATH, keeps /private (Foundation drops it)
-    free(resolved)
     var info = stat()
-    let deadline = Date().addingTimeInterval(120)  // finish well before the caller stops waiting (180 s)
     let jids = String(data: try JSONEncoder().encode(selection.jids), encoding: .utf8) ?? "[]"
     var copied: [[String: Any]] = [], skipped: [[String: Any]] = []
     for pk in request.pks.prefix(100) {
@@ -279,7 +283,7 @@ func copyAudio(source: String, data: String) throws -> [String: Any] {
             skipped.append(["pk": pk, "reason": "unsupported file"]); continue
         }
         // WhatsApp stores paths relative to its Message folder; fall back to the container root.
-        guard let src = [source + "/Message/" + rel, source + "/" + rel].first(where: { fm.fileExists(atPath: $0) }) else {
+        guard let src = [root + "Message/" + rel, root + rel].first(where: { fm.fileExists(atPath: $0) }) else {
             skipped.append(["pk": pk, "reason": "not downloaded"]); continue
         }
         let input = open(src, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)  // a FIFO must not block the helper
@@ -292,17 +296,44 @@ func copyAudio(source: String, data: String) throws -> [String: Any] {
             skipped.append(["pk": pk, "reason": "too large"]); continue
         }
         let name = "\(pk).\(ext)"
+        let bytes = try readUpTo(input, 16 << 20)
+        guard let bytes else { skipped.append(["pk": pk, "reason": "too large"]); continue }  // it grew
+        guard Date() < deadline else { skipped.append(["pk": pk, "reason": "out of time"]); continue }
         unlinkat(folder, name, 0)
         let output = openat(folder, name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
         guard output >= 0 else { throw Failure(kind: "write", message: "\(name): \(String(cString: strerror(errno)))") }
         defer { close(output) }
-        let bytes = FileHandle(fileDescriptor: input).readDataToEndOfFile()
         guard bytes.withUnsafeBytes({ write(output, $0.baseAddress, $0.count) }) == bytes.count else {
             throw Failure(kind: "write", message: "\(name): short write")
         }
         copied.append(["pk": pk, "file": name])
     }
     return ["copied": copied, "skipped": skipped]
+}
+
+/// At most `limit` bytes of a file; nil if it holds more (it grew after fstat).
+func readUpTo(_ fd: Int32, _ limit: Int) throws -> Data? {
+    var data = Data(), chunk = [UInt8](repeating: 0, count: 1 << 16)
+    while true {
+        let n = read(fd, &chunk, chunk.count)
+        if n < 0 { throw Failure(kind: "read", message: String(cString: strerror(errno))) }
+        if n == 0 { return data }
+        data.append(contentsOf: chunk[0..<n])
+        if data.count > limit { return nil }
+    }
+}
+
+/// realpath(3) keeps /private like F_GETPATH does (Foundation's resolvingSymlinksInPath drops it).
+func real(_ path: String) -> String? {
+    guard let resolved = realpath(path, nil) else { return nil }
+    defer { free(resolved) }
+    return String(cString: resolved)
+}
+
+/// The audio verb reads only from WhatsApp's own container, or from the temporary directory (tests).
+func sourceAllowed(_ root: String) -> Bool {
+    if let whatsapp = real(defaultSource), root == whatsapp + "/" { return true }
+    return real(NSTemporaryDirectory()).map { root.hasPrefix($0 + "/") } ?? false
 }
 
 /// Where an open descriptor really is (F_GETPATH), whatever name was used to open it.

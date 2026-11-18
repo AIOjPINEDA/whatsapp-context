@@ -301,7 +301,8 @@ def transcribe(chat: str, since: datetime | None = None, until: datetime | None 
     cached = transcripts.load()
     missing = [n for n in notes if not n["media_path"]]
     too_long = [n for n in notes if n["media_path"] and (n["media_seconds"] or 0) > TRANSCRIBE_MAX_SECONDS]
-    todo = [n for n in notes if n["Z_PK"] not in cached and n["media_path"] and n not in too_long]
+    todo = [n for n in notes if not transcripts.lookup(cached, n["Z_PK"], n["ZSTANZAID"]) and n["media_path"]
+            and n not in too_long]
     done, failed, not_downloaded, audio = [], 0, len(missing), paths.data_dir() / "audio"
     if todo:
         with _lock("transcribe.lock"):  # one run at a time: they share data/audio
@@ -329,12 +330,13 @@ def _transcribe(todo: list, locale: str, audio: Path) -> tuple[list[dict], int, 
         if not copy.get("ok"):
             raise ExportError(f"WAExport could not copy the voice notes: {copy.get('error', 'unknown error')}")
         files = {c["file"]: c["pk"] for c in copy.get("copied", [])}
+        stanzas = {n["Z_PK"]: n["ZSTANZAID"] for n in todo}
         gone = sum(s.get("reason") == "not downloaded" for s in copy.get("skipped", []))  # path but no file
         if files:
             seconds = sum(n["media_seconds"] or 0 for n in todo)
             for item in _transcriber_lines([locale, *(str(audio / f) for f in files)], timeout=60 + seconds / 5):
                 if item.get("file") in files and "text" in item:
-                    done.append({**item, "pk": files[item["file"]]})
+                    done.append({**item, "pk": files[item["file"]], "stanza": stanzas[files[item["file"]]]})
     finally:
         _empty(audio)
     with _lock(), connect() as conn:  # a revoke exported meanwhile must win: keep only what is still there

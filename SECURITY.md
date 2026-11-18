@@ -7,7 +7,7 @@ it does not, and how to report a problem.
 
 - **WhatsApp's data is never modified.** The helper opens `ChatStorage.sqlite` read-only
   (`mode=ro&readonly_shm=1`, or `immutable=1` without a WAL).
-- **One program holds Full Disk Access:** `/Applications/WAExport.app`, about 390 lines of Swift with no
+- **One program holds Full Disk Access:** `/Applications/WAExport.app`, about 420 lines of Swift with no
   network and no child processes. The MCP server and `wa` launch it through `open` and run unprivileged.
 - **A misplaced permission is visible.** If the process running the server or `wa` can read WhatsApp
   itself, every `wa` and MCP answer (errors included) starts with a `WARNING:` line.
