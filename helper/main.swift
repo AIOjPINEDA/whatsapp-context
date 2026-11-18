@@ -11,7 +11,7 @@
 import Foundation
 import SQLite3
 
-let helperVersion = "0.2.1"
+let helperVersion = "0.3.0"
 let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 struct Failure: Error {
@@ -220,9 +220,134 @@ func export(source: String, data: String) throws -> [String: Any] {
     return ["chats": chats, "messages": messages, "selected": selection.jids.count, "exported_at": exportedAt]
 }
 
-func writeStatus(_ status: [String: Any], to data: String) {
+/// `audio` verb: copies the voice notes listed in audio-request.json into data/audio, one file per message.
+/// The helper checks each one against selection.json itself (allowed chat, inside the window, a voice note),
+/// so a forged request cannot reach other chats. Only .opus/.m4a, regular files up to 16 MB, never symlinks.
+func copyAudio(source: String, data: String) throws -> [String: Any] {
+    struct Note: Decodable { var pk: Int64; var stanza: String }  // both: a restored database can reuse a Z_PK
+    struct Request: Decodable { var notes: [Note] = [] }
+    let deadline = Date().addingTimeInterval(100)  // no copy is written after this (the caller waits 180 s)
+    // The container is pinned by descriptor first; every note must really be inside it when opened.
+    let container = open(source, O_RDONLY | O_DIRECTORY)
+    guard container >= 0 else { throw Failure(kind: "open", message: "\(source): not found") }
+    defer { close(container) }
+    guard let root = realPath(container).map({ $0 + "/" }), sourceAllowed(root) else {
+        throw Failure(kind: "open", message: "\(source) is not WhatsApp's container")
+    }
+    let chatStorage = root + "ChatStorage.sqlite"
+    try preflight(chatStorage)
+    var mem: OpaquePointer?
+    defer { sqlite3_close(mem) }
+    guard sqlite3_open_v2(":memory:", &mem, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil) == SQLITE_OK else {
+        throw Failure(kind: "open", message: "memory: \(errorMessage(mem))")
+    }
+    try snapshot(chatStorage, into: mem, schema: "main")
+    try require(mem, "main", "ZWAMEDIAITEM", ["ZMESSAGE", "ZMEDIALOCALPATH"])
+    let fm = FileManager.default
+    let selection = fm.contents(atPath: data + "/selection.json").flatMap { try? JSONDecoder().decode(Selection.self, from: $0) }
+        ?? Selection()
+    let request = fm.contents(atPath: data + "/audio-request.json").flatMap { try? JSONDecoder().decode(Request.self, from: $0) }
+        ?? Request()
+    // Names can be swapped for links between a check and a use, so both ends are checked on the open
+    // descriptor: the copies land in data/audio and nowhere else, and are read from inside the container.
+    let dir = data + "/audio"
+    mkdir(dir, 0o700)
+    let folder = open(dir, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+    guard folder >= 0 else { throw Failure(kind: "write", message: "\(dir) is not a folder") }
+    defer { close(folder) }
+    guard let real = realPath(folder), allowed((real as NSString).deletingLastPathComponent, defaultData),
+          (real as NSString).lastPathComponent == "audio" else {
+        throw Failure(kind: "write", message: "\(dir) is not inside the data folder")
+    }
+    var info = stat()
+    let jids = String(data: try JSONEncoder().encode(selection.jids), encoding: .utf8) ?? "[]"
+    var copied: [[String: Any]] = [], skipped: [[String: Any]] = []
+    for note in request.notes.prefix(100) {
+        let pk = note.pk
+        guard Date() < deadline else { skipped.append(["pk": pk, "reason": "out of time"]); continue }
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        let sql = """
+            SELECT mi.ZMEDIALOCALPATH FROM main.ZWAMESSAGE m JOIN main.ZWAMEDIAITEM mi ON mi.Z_PK = m.ZMEDIAITEM
+            WHERE m.Z_PK = ?1 AND m.ZSTANZAID = ?4 AND m.ZMESSAGETYPE = 3 AND m.ZMESSAGEDATE >= ?2 AND m.ZCHATSESSION IN (
+                SELECT Z_PK FROM main.ZWACHATSESSION WHERE ZCONTACTJID IN (SELECT value FROM json_each(?3)))
+            """
+        guard sqlite3_prepare_v2(mem, sql, -1, &stmt, nil) == SQLITE_OK else { throw Failure(kind: "sql", message: errorMessage(mem)) }
+        sqlite3_bind_int64(stmt, 1, pk)
+        sqlite3_bind_double(stmt, 2, selection.since)
+        sqlite3_bind_text(stmt, 3, jids, -1, sqliteTransient)
+        sqlite3_bind_text(stmt, 4, note.stanza, -1, sqliteTransient)
+        guard sqlite3_step(stmt) == SQLITE_ROW, let raw = sqlite3_column_text(stmt, 0) else {
+            skipped.append(["pk": pk, "reason": "not an allowed voice note"]); continue
+        }
+        let rel = String(cString: raw)
+        let ext = (rel as NSString).pathExtension.lowercased()
+        guard !rel.isEmpty, !rel.hasPrefix("/"), !rel.split(separator: "/").contains(".."), ["opus", "m4a"].contains(ext) else {
+            skipped.append(["pk": pk, "reason": "unsupported file"]); continue
+        }
+        // WhatsApp stores paths relative to its Message folder; fall back to the container root.
+        guard let src = [root + "Message/" + rel, root + rel].first(where: { fm.fileExists(atPath: $0) }) else {
+            skipped.append(["pk": pk, "reason": "not downloaded"]); continue
+        }
+        let input = open(src, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)  // a FIFO must not block the helper
+        guard input >= 0 else { skipped.append(["pk": pk, "reason": "unreadable"]); continue }
+        defer { close(input) }
+        guard let opened = realPath(input), opened.hasPrefix(root) else {
+            skipped.append(["pk": pk, "reason": "unreadable"]); continue
+        }
+        guard fstat(input, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG, info.st_size <= 16 << 20 else {
+            skipped.append(["pk": pk, "reason": "too large"]); continue
+        }
+        let name = "\(pk).\(ext)"
+        let bytes = try readUpTo(input, 16 << 20)
+        guard let bytes else { skipped.append(["pk": pk, "reason": "too large"]); continue }  // it grew
+        guard Date() < deadline else { skipped.append(["pk": pk, "reason": "out of time"]); continue }
+        unlinkat(folder, name, 0)
+        let output = openat(folder, name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
+        guard output >= 0 else { throw Failure(kind: "write", message: "\(name): \(String(cString: strerror(errno)))") }
+        defer { close(output) }
+        guard bytes.withUnsafeBytes({ write(output, $0.baseAddress, $0.count) }) == bytes.count else {
+            throw Failure(kind: "write", message: "\(name): short write")
+        }
+        copied.append(["pk": pk, "stanza": note.stanza, "file": name])
+    }
+    return ["copied": copied, "skipped": skipped]
+}
+
+/// At most `limit` bytes of a file; nil if it holds more (it grew after fstat).
+func readUpTo(_ fd: Int32, _ limit: Int) throws -> Data? {
+    var data = Data(), chunk = [UInt8](repeating: 0, count: 1 << 16)
+    while true {
+        let n = read(fd, &chunk, chunk.count)
+        if n < 0 { throw Failure(kind: "read", message: String(cString: strerror(errno))) }
+        if n == 0 { return data }
+        data.append(contentsOf: chunk[0..<n])
+        if data.count > limit { return nil }
+    }
+}
+
+/// realpath(3) keeps /private like F_GETPATH does (Foundation's resolvingSymlinksInPath drops it).
+func real(_ path: String) -> String? {
+    guard let resolved = realpath(path, nil) else { return nil }
+    defer { free(resolved) }
+    return String(cString: resolved)
+}
+
+/// The audio verb reads only from WhatsApp's own container, or from the temporary directory (tests).
+func sourceAllowed(_ root: String) -> Bool {
+    if let whatsapp = real(defaultSource), root == whatsapp + "/" { return true }
+    return real(NSTemporaryDirectory()).map { root.hasPrefix($0 + "/") } ?? false
+}
+
+/// Where an open descriptor really is (F_GETPATH), whatever name was used to open it.
+func realPath(_ fd: Int32) -> String? {
+    var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+    return fcntl(fd, F_GETPATH, &buffer) == 0 ? String(cString: buffer) : nil
+}
+
+func writeStatus(_ status: [String: Any], to data: String, file: String = "status.json") {
     if let json = try? JSONSerialization.data(withJSONObject: status, options: [.prettyPrinted, .sortedKeys]) {
-        try? json.write(to: URL(fileURLWithPath: data + "/status.json"), options: .atomic)
+        try? json.write(to: URL(fileURLWithPath: data + "/" + file), options: .atomic)
     }
 }
 
@@ -235,6 +360,7 @@ let defaultData = home + "/.local/share/whatsapp-context"
 var source = defaultSource
 var data = defaultData
 var runID = ""
+var verb = "export"
 var args = Array(CommandLine.arguments.dropFirst())
 while let arg = args.first {
     args.removeFirst()
@@ -243,7 +369,8 @@ while let arg = args.first {
     case "--data": data = args.isEmpty ? data : args.removeFirst()
     case "--run": runID = args.isEmpty ? "" : args.removeFirst()
     case "--version": print(helperVersion); exit(0)
-    default: break  // "export" is the only verb
+    case "audio": verb = "audio"
+    default: break  // "export" is the default verb
     }
 }
 
@@ -275,23 +402,24 @@ try? FileManager.default.createDirectory(atPath: data, withIntermediateDirectori
 
 var status: [String: Any] = ["run": runID, "helper_version": helperVersion,
                              "sqlite_version": String(cString: sqlite3_libversion())]
+let statusFile = verb == "audio" ? "audio.json" : "status.json"
 do {
-    let result = try export(source: source, data: data)
+    let result = verb == "audio" ? try copyAudio(source: source, data: data) : try export(source: source, data: data)
     status.merge(result) { _, new in new }
     status["ok"] = true
-    writeStatus(status, to: data)
+    writeStatus(status, to: data, file: statusFile)
     exit(0)
 } catch let failure as Failure {
     status["ok"] = false
     status["error_kind"] = failure.kind
     status["error"] = failure.message
     status["failed_at"] = ISO8601DateFormatter().string(from: Date())
-    writeStatus(status, to: data)
+    writeStatus(status, to: data, file: statusFile)
     exit(failure.kind == "fda_denied" ? 77 : 1)
 } catch {
     status["ok"] = false
     status["error_kind"] = "other"
     status["error"] = "\(error)"
-    writeStatus(status, to: data)
+    writeStatus(status, to: data, file: statusFile)
     exit(1)
 }

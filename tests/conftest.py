@@ -77,7 +77,7 @@ def build_container(root: Path) -> sqlite3.Connection:
             ZISFROMME INTEGER, ZMESSAGETYPE INTEGER, ZTEXT TEXT, ZFROMJID TEXT, ZGROUPMEMBER INTEGER,
             ZMEDIAITEM INTEGER, ZSTANZAID TEXT);
         CREATE TABLE ZWAMEDIAITEM (Z_PK INTEGER PRIMARY KEY, ZMESSAGE INTEGER, ZTITLE TEXT,
-            ZMEDIALOCALPATH TEXT, ZMEDIAURL TEXT, ZMEDIAKEY BLOB, ZMETADATA BLOB);
+            ZMEDIALOCALPATH TEXT, ZMEDIAURL TEXT, ZMEDIAKEY BLOB, ZMETADATA BLOB, ZMOVIEDURATION REAL);
         CREATE TABLE ZWAGROUPMEMBER (Z_PK INTEGER PRIMARY KEY, ZCHATSESSION INTEGER, ZMEMBERJID TEXT,
             ZCONTACTNAME TEXT, ZISACTIVE INTEGER);
         CREATE TABLE ZWAGROUPINFO (Z_PK INTEGER PRIMARY KEY, ZCHATSESSION INTEGER, ZCREATORJID TEXT);
@@ -87,7 +87,7 @@ def build_container(root: Path) -> sqlite3.Connection:
     db.execute("UPDATE ZWACHATSESSION SET ZLASTMESSAGE = 3 WHERE Z_PK = 1")
     db.executemany("INSERT INTO ZWAMESSAGE VALUES (?,?,?,?,?,?,NULL,?,?,?)", MESSAGES)
     quote = pb((5, b"S1"), (6, ANA_LID.encode()), (19, pb((1, b"Propuesta: enviar el borrador"))))
-    db.executemany("INSERT INTO ZWAMEDIAITEM VALUES (?,?,?,?,?,?,?)", [
+    db.executemany("INSERT INTO ZWAMEDIAITEM VALUES (?,?,?,?,?,?,?,NULL)", [
         (1, 6, None, "Media/x/factura.pdf", "https://mmg.whatsapp.net/f", b"KEY", None),
         (2, 10, "foto de la pizarra", None, "https://mmg.whatsapp.net/i", b"KEY", None),
         (3, 3, None, None, None, None, quote),

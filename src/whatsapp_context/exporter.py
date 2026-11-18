@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import paths
+from . import paths, transcripts
 from .policy import load_policy, resolve
 from .store import Store, check_schema, connect, exported_at, latest_message
 from .text import LOCAL, fmt, plural, to_coredata
@@ -83,11 +83,12 @@ def _fingerprint(policy_digest: str, jids: object) -> str:
     return hashlib.sha256(f"{policy_digest}{json.dumps(jids)}".encode()).hexdigest() if policy_digest else ""
 
 
-def run_helper() -> dict:
-    """Run one export and return its status.json (raises if the helper never answered)."""
+def run_helper(verb: str = "export") -> dict:
+    """Run WAExport once and return its status file (raises if the helper never answered)."""
     run_id = uuid.uuid4().hex
     _prepare_data_dir()
-    args = ["export", "--run", run_id, "--data", str(paths.data_dir())]
+    status_file = paths.data_dir() / "audio.json" if verb == "audio" else paths.status_file()
+    args = [verb, "--run", run_id, "--data", str(paths.data_dir())]
     if os.environ.get("WA_SOURCE_DIR"):
         args += ["--source", os.environ["WA_SOURCE_DIR"]]
     if os.environ.get("WA_HELPER_BIN"):  # tests run the binary directly
@@ -97,7 +98,7 @@ def run_helper() -> dict:
     else:
         raise ExportError(f"{paths.helper_app()} not found: run make install (or make setup).")
     proc = subprocess.run(command, timeout=180, capture_output=True, text=True, check=False)
-    status = _read_json(paths.status_file())
+    status = _read_json(status_file)
     if status.get("run") != run_id:
         detail = (proc.stderr or "").strip()[:300]
         if "-10825" in detail:  # LaunchServices: the app needs a newer macOS than this one
@@ -127,7 +128,20 @@ def _export() -> dict:
     if status.get("ok"):  # only a complete export under this policy and selection counts as fresh
         status["fingerprint"] = _fingerprint(digest, wanted["jids"])
         paths.write_private(paths.status_file(), json.dumps(status, indent=1))
+        with connect() as conn:
+            transcripts.prune(conn)  # revoked chats and messages outside the window lose their transcripts
     return status
+
+
+def copy_audio(notes: dict[int, str]) -> dict:
+    """Have WAExport copy these voice notes ({Z_PK: stanza ID}) into data/audio; it re-checks each one."""
+    with _lock():
+        request = {"notes": [{"pk": pk, "stanza": stanza} for pk, stanza in notes.items()]}
+        paths.write_private(paths.data_dir() / "audio-request.json", json.dumps(request))
+        try:
+            return run_helper("audio")
+        finally:
+            (paths.data_dir() / "audio-request.json").unlink(missing_ok=True)
 
 
 def _with_schema(status: dict, conn: sqlite3.Connection) -> dict:
@@ -150,10 +164,10 @@ def _is_fresh(status: dict) -> bool:
 
 
 @contextmanager
-def _lock() -> Iterator[None]:
-    """Serialises exports across threads and across the MCP processes of several clients."""
+def _lock(name: str = "refresh.lock") -> Iterator[None]:
+    """Serialises exports (or transcriptions) across threads and the MCP processes of several clients."""
     _prepare_data_dir()
-    with os.fdopen(os.open(paths.data_dir() / "refresh.lock", os.O_RDWR | os.O_CREAT, 0o600)) as handle:
+    with os.fdopen(os.open(paths.data_dir() / name, os.O_RDWR | os.O_CREAT, 0o600)) as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)  # released when the file closes
         yield
 
@@ -234,3 +248,106 @@ def with_canary(text: str, exposed: bool | None = None) -> str:
     """Every CLI and MCP answer goes through here: the Full Disk Access warning comes first."""
     exposed = caller_can_read_whatsapp() if exposed is None else exposed
     return f"{CANARY_WARNING}\n{text}" if exposed else text
+
+
+TRANSCRIBE_MAX_SECONDS = 15 * 60
+TRANSCRIBE_OFF = ('Transcription is off: set [options] transcribe = "es-ES" (your language) in '
+                  "config/policy.toml.")
+
+
+def transcriber() -> Path:
+    return Path(os.environ.get("WA_TRANSCRIBER") or paths.REPO / "build" / "wa-transcribe")
+
+
+def _transcriber_lines(args: list[str], timeout: float) -> list[dict]:
+    if not transcriber().exists():
+        raise ExportError(f"{transcriber()} not found: it needs macOS 26 and Command Line Tools 26 or later "
+                          f"(`softwareupdate --list`), then `make build` in {paths.REPO}.")
+    proc = subprocess.run([str(transcriber()), *args], capture_output=True, text=True, timeout=timeout, check=False)
+    items = []
+    for line in proc.stdout.splitlines():
+        try:
+            items.append(json.loads(line))
+        except ValueError:
+            continue
+    for item in items:
+        if "error" in item and "file" not in item:
+            raise ExportError(f"Transcription: {item['error']}")
+    return items
+
+
+def install_language() -> str:
+    """Ask macOS to download the speech model for the policy's language (from Apple)."""
+    locale = load_policy(paths.policy_file()).transcribe
+    if not locale:
+        raise ValueError(TRANSCRIBE_OFF)
+    _transcriber_lines(["--install", locale], timeout=1800)
+    return f"Speech model for {locale} is installed."
+
+
+def transcribe(chat: str, since: datetime | None = None, until: datetime | None = None, limit: int = 20) -> str:
+    """Transcribe the voice notes of one allowed chat on this Mac (Apple's on-device engine).
+
+    WAExport copies only the notes still missing a transcript; the copies are deleted afterwards and only
+    the text is kept. Returns a summary followed by the chat with its transcripts."""
+    status = ensure_fresh()
+    if not status.get("ok"):
+        raise ExportError(f"Could not refresh: {status.get('error', 'unknown error')}")
+    with connect() as conn:
+        store = Store(conn)
+        locale = store.policy.transcribe
+        if not locale:
+            raise ValueError(TRANSCRIBE_OFF)
+        notes = store.voice_notes(chat, since, until, limit)
+    cached = transcripts.load()
+    missing = [n for n in notes if not n["media_path"]]
+    too_long = [n for n in notes if n["media_path"] and (n["media_seconds"] or 0) > TRANSCRIBE_MAX_SECONDS]
+    todo = [n for n in notes if not transcripts.lookup(cached, n["Z_PK"], n["ZSTANZAID"]) and n["media_path"]
+            and n not in too_long]
+    done, failed, not_downloaded, audio = [], 0, len(missing), paths.data_dir() / "audio"
+    if todo:
+        with _lock("transcribe.lock"):  # one run at a time: they share data/audio
+            done, failed, gone = _transcribe(todo, locale, audio)
+        not_downloaded += gone
+    lines = [
+f"Transcribed {plural(len(done), 'voice note')} on this Mac ({locale}); "
+             f"{len(notes) - len(todo) - len(missing) - len(too_long)} already had a transcript."]
+    if not_downloaded:
+        lines.append(f"{plural(not_downloaded, 'voice note')} not downloaded on this Mac: play them once in WhatsApp.")
+    if too_long:
+        lines.append(f"{plural(len(too_long), 'voice note')} longer than {TRANSCRIBE_MAX_SECONDS // 60} min skipped.")
+    if failed:
+        lines.append(f"{plural(failed, 'voice note')} could not be transcribed.")
+    with connect() as conn:
+        return "\n".join(lines) + "\n\n" + Store(conn).messages(chat, since, until)
+
+
+def _transcribe(todo: list, locale: str, audio: Path) -> tuple[list[dict], int, int]:
+    """Copy, transcribe, delete, save: returns (transcribed, failed, not downloaded)."""
+    done: list[dict] = []
+    try:
+        _empty(audio)  # leftovers of an interrupted run
+        copy = copy_audio({n["Z_PK"]: n["ZSTANZAID"] for n in todo if n["ZSTANZAID"]})
+        if not copy.get("ok"):
+            raise ExportError(f"WAExport could not copy the voice notes: {copy.get('error', 'unknown error')}")
+        files = {c["file"]: (c["pk"], c["stanza"]) for c in copy.get("copied", [])}
+        gone = sum(s.get("reason") == "not downloaded" for s in copy.get("skipped", []))  # path but no file
+        if files:
+            seconds = sum(n["media_seconds"] or 0 for n in todo)
+            for item in _transcriber_lines([locale, *(str(audio / f) for f in files)], timeout=60 + seconds / 5):
+                if item.get("file") in files and "text" in item:
+                    pk, stanza = files[item["file"]]  # as WAExport found it, not as the export last saw it
+                    done.append({**item, "pk": pk, "stanza": stanza})
+    finally:
+        _empty(audio)
+    with _lock(), connect() as conn:  # a revoke exported meanwhile must win: keep only what is still there
+        done = transcripts.save(done, conn)
+    return done, len(todo) - len(done) - gone, gone
+
+
+def _empty(folder: Path) -> None:
+    """Delete the copied audio files (only regular files; the folder itself stays, private)."""
+    if folder.is_dir() and not folder.is_symlink():
+        for item in folder.iterdir():
+            if item.is_file() and not item.is_symlink():
+                item.unlink(missing_ok=True)

@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
-from . import paths
+from . import paths, transcripts
 from .policy import GROUP, Identities, Selection, is_status, load_policy, resolve, table_names
 from .text import LOCAL, clean, fmt, from_coredata, plural, quoted_reply, to_coredata
 
@@ -20,6 +20,7 @@ TYPES = {0: None, 1: "image", 2: "video", 3: "audio", 4: "contact", 5: "location
          7: None, 8: "document", 10: "notice", 11: "GIF", 14: "deleted message", 15: "sticker",
          46: "poll", 54: "video note", 59: "call", 66: "album"}
 CAPTIONED = {1, 2, 3, 11, 15, 54}
+AUDIO = 3
 SYSTEM = {6, 10}
 NOT_A_REPLY = SYSTEM | {14}
 
@@ -29,7 +30,7 @@ REQUIRED = {
     "chats": {"Z_PK", "ZCONTACTJID", "ZPARTNERNAME", "ZLASTMESSAGEDATE"},
     "messages": {"Z_PK", "ZCHATSESSION", "ZMESSAGEDATE", "ZISFROMME", "ZMESSAGETYPE", "ZTEXT", "ZFROMJID",
                  "ZGROUPMEMBER", "ZMEDIAITEM", "ZSTANZAID"},
-    "media": {"Z_PK", "ZTITLE", "ZMEDIALOCALPATH", "ZMETADATA"},
+    "media": {"Z_PK", "ZTITLE", "ZMEDIALOCALPATH", "ZMETADATA", "ZMOVIEDURATION"},
     "group_members": {"Z_PK", "ZCHATSESSION", "ZMEMBERJID", "ZCONTACTNAME"},
 }
 # Tables that may be missing from an export, checked only when present (Names and Identities read them).
@@ -153,6 +154,10 @@ class Store:
         self._chats = {chat["ZCONTACTJID"]: chat for chat in chat_rows(conn)}
         labels = Counter(self._label(self._chats[j]) for j in self.sel.content if j in self._chats)
         self._repeated = {label for label, n in labels.items() if n > 1}
+        cache = transcripts.load()
+        self.transcript = lambda pk, stanza: transcripts.lookup(cache, pk, stanza)
+        conn.create_function("transcript", 2, lambda pk, stanza: (row := self.transcript(pk, stanza)) and row["text"],
+                             deterministic=True)
 
     def _label(self, row: dict) -> str:
         return " ".join(clean(row["ZPARTNERNAME"]).split()) or self.names.name(row["ZCONTACTJID"])
@@ -195,6 +200,10 @@ class Store:
             status = "downloaded" if row["media_path"] else "not downloaded"
             parts.append(f"[document: {' '.join(text.split()) or 'untitled'} · {status}]")
             text = clean(row["media_title"])
+        elif mtype == AUDIO:
+            parts.append(self._audio(row))
+            if (cached := self.transcript(row["Z_PK"], row["ZSTANZAID"])) and cached["text"]:
+                text = clean(cached["text"])
         elif label:
             parts.append(f"[{label}]")
             if mtype in CAPTIONED:
@@ -209,11 +218,37 @@ class Store:
             parts.append(_indent(text))
         return f"[{fmt(from_coredata(row['ZMESSAGEDATE']))}] {sender}: {' '.join(parts)}"
 
+    def _audio(self, row: sqlite3.Row) -> str:
+        """Voice-note label: its length and whether a transcript (third-party speech, machine-made) exists."""
+        seconds = int(row["media_seconds"] or 0)
+        length = f" {seconds // 60}:{seconds % 60:02d}" if seconds else ""
+        cached = self.transcript(row["Z_PK"], row["ZSTANZAID"])
+        if cached:
+            if not cached["text"]:
+                return f"[audio{length} · transcribed: no speech detected]"
+            doubt = "; low confidence" if (cached["confidence"] or 1) < 0.5 else ""
+            return f"[audio{length} · transcribed on this Mac, {cached['locale']}, may contain errors{doubt}]"
+        if not row["media_path"]:
+            return f"[audio{length} · not downloaded on this Mac]"
+        return f"[audio{length} · not transcribed]"
+
+    def voice_notes(self, chat: str, since: datetime | None, until: datetime | None, limit: int) -> list[sqlite3.Row]:
+        """Voice notes of one content chat, most recent first."""
+        row = self.find_chat(chat)
+        return self.conn.execute(
+            "SELECT m.Z_PK, m.ZSTANZAID, mi.ZMEDIALOCALPATH AS media_path, mi.ZMOVIEDURATION AS media_seconds "
+            "FROM messages m LEFT JOIN media mi ON mi.Z_PK = m.ZMEDIAITEM "
+            "WHERE m.ZCHATSESSION = ? AND m.ZMESSAGETYPE = ? AND m.ZMESSAGEDATE >= ? "
+            "AND m.ZMESSAGEDATE < ? ORDER BY m.ZMESSAGEDATE DESC LIMIT ?",
+            (row["Z_PK"], AUDIO, to_coredata(since) if since else 0, to_coredata(until) if until else 1e12,
+             max(1, min(limit, 100)))).fetchall()
+
     def _messages_sql(self, where: str) -> str:
         return f"""
             SELECT m.Z_PK, m.ZCHATSESSION, m.ZMESSAGEDATE, m.ZISFROMME, m.ZMESSAGETYPE, m.ZTEXT, m.ZFROMJID,
                    m.ZSTANZAID, gm.ZMEMBERJID AS member_jid, gm.ZCONTACTNAME AS member_name,
-                   mi.ZTITLE AS media_title, mi.ZMEDIALOCALPATH AS media_path, mi.ZMETADATA AS media_meta
+                   mi.ZTITLE AS media_title, mi.ZMEDIALOCALPATH AS media_path, mi.ZMETADATA AS media_meta,
+                   mi.ZMOVIEDURATION AS media_seconds
             FROM messages m
             LEFT JOIN group_members gm ON gm.Z_PK = m.ZGROUPMEMBER
             LEFT JOIN media mi ON mi.Z_PK = m.ZMEDIAITEM
@@ -283,9 +318,10 @@ class Store:
         limit = max(1, min(limit, 500))
         rows = self.conn.execute(
             self._messages_sql(f"m.ZCHATSESSION IN ({marks}) AND m.ZMESSAGEDATE >= ? "
-                               "AND (m.ZTEXT LIKE ? ESCAPE '\\' OR mi.ZTITLE LIKE ? ESCAPE '\\')")
+                               "AND (m.ZTEXT LIKE ? ESCAPE '\\' OR mi.ZTITLE LIKE ? ESCAPE '\\' "
+                               "OR transcript(m.Z_PK, m.ZSTANZAID) LIKE ? ESCAPE '\\')")
             + " ORDER BY m.ZMESSAGEDATE DESC LIMIT ?",
-            (*pks, to_coredata(since) if since else 0, pattern, pattern, limit)).fetchall()
+            (*pks, to_coredata(since) if since else 0, pattern, pattern, pattern, limit)).fetchall()
         lines = [f"{self._tagged(by_pk[r['ZCHATSESSION']])} · {line}" for r in rows if (line := self._render(r, {}))]
         if len(rows) == limit:
             lines.append(f"(truncated at {plural(limit, 'result')}, most recent first: there are more; narrow "

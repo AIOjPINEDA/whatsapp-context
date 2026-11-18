@@ -42,3 +42,6 @@ chats = []
 [options]
 # Days of history exported for readable chats.
 days = 180
+# Voice-note transcription on this Mac (Apple's engine, macOS 26+), on demand with `wa transcribe <chat>`
+# or the assistant's whatsapp_transcribe. Set your language, e.g. "es-ES"; "" keeps it off.
+transcribe = ""
