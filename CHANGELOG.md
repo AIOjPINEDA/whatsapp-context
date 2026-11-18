@@ -3,7 +3,8 @@
 ## 0.3.0
 
 **This release changes WAExport.** After `git pull`, run `make setup`; at its Full Disk Access step,
-remove WAExport from the list (-) and drag it in again (`make grant` does only that step).
+remove WAExport from the list (-) and drag it in again (`make grant` does only that step). Restart your
+assistants **before** adding `transcribe` to the policy: a server still running 0.2 rejects the new key.
 
 - Voice notes can be transcribed on the Mac with Apple's SpeechTranscriber (macOS 26 or later): no
   network, off until `[options] transcribe = "<language>"` names a language. New `wa transcribe`
@@ -13,6 +14,10 @@ remove WAExport from the list (-) and drag it in again (`make grant` does only t
   deleted right after transcribing; only the text is cached in `transcripts.sqlite` (`0600`), pruned after
   every export so revoked, excluded or expired chats lose their transcripts too.
 - `build/wa-transcribe`, the transcriber, has no Full Disk Access: it only reads the copies it is given.
+  It needs Command Line Tools 26 or later; with older ones `make build` skips it and builds the rest.
+- WAExport checks both ends of every copy on the open file (`F_GETPATH`), so a folder swapped for a link
+  cannot make it read outside WhatsApp's container or write outside `audio/`; it never waits on a FIFO
+  and stops within 120 s. Transcriptions run one at a time, and a revoke exported meanwhile wins.
 - Messages show a voice note's length and whether it is transcribed, not downloaded or pending; search
   also looks inside transcripts.
 - WAExport reports version 0.3.0.

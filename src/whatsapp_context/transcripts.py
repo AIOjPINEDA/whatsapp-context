@@ -42,18 +42,26 @@ def load() -> dict[int, sqlite3.Row]:
             return {}
 
 
-def save(rows: list[dict]) -> None:
+def _voice_notes(export: sqlite3.Connection) -> set[int]:
+    return {pk for (pk,) in export.execute("SELECT Z_PK FROM messages WHERE ZMESSAGETYPE = 3")}
+
+
+def save(rows: list[dict], export: sqlite3.Connection) -> list[dict]:
+    """Cache the rows whose voice note is still in the export (call under the export lock); returns them."""
     created = datetime.now(UTC).isoformat(timespec="seconds")
+    keep = _voice_notes(export)
+    rows = [r for r in rows if r["pk"] in keep]
     values = [(r["pk"], r["locale"], r["text"], r.get("confidence"), r.get("seconds"), created) for r in rows]
     with closing(_open()) as conn, conn:
         conn.executemany("INSERT OR REPLACE INTO transcripts VALUES (?, ?, ?, ?, ?, ?)", values)
+    return rows
 
 
 def prune(export: sqlite3.Connection) -> int:
     """Drop transcripts whose voice note is no longer in the export; returns how many went."""
     if not cache_file().exists():
         return 0
-    keep = {pk for (pk,) in export.execute("SELECT Z_PK FROM messages WHERE ZMESSAGETYPE = 3")}
+    keep = _voice_notes(export)
     with closing(_open()) as conn, conn:
         gone = [pk for (pk,) in conn.execute("SELECT pk FROM transcripts") if pk not in keep]
         conn.executemany("DELETE FROM transcripts WHERE pk = ?", [(pk,) for pk in gone])

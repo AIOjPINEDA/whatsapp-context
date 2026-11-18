@@ -102,8 +102,10 @@ days = 180
 
 ## Notas de voz (opcional, macOS 26+)
 
-Las notas de voz se pueden transcribir **en tu Mac** con el motor de voz de Apple: sin red ni nube. Está
-desactivado hasta que pongas un idioma en `config/policy.toml`:
+Las notas de voz se pueden transcribir **en tu Mac** con el motor de voz de Apple: sin red ni nube. Necesita
+Command Line Tools 26 o posterior (con las anteriores se compila todo lo demás). Está desactivado hasta que
+pongas un idioma en `config/policy.toml`, **después** de reiniciar tus asistentes con esta versión (un
+servidor anterior rechaza la clave):
 
 ```toml
 [options]

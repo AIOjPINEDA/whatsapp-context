@@ -31,7 +31,12 @@ setup:
 grant:
 	@INSTALLED="$(INSTALLED)" scripts/grant.sh
 
-build: $(APP)/Contents/MacOS/WAExport build/wa-transcribe
+# The transcriber needs the macOS 26 SDK (Command Line Tools 26+); older toolchains build WAExport only.
+SDK_MAJOR := $(shell xcrun --show-sdk-version 2>/dev/null | cut -d. -f1)
+TRANSCRIBER := $(shell [ "$(SDK_MAJOR)" -ge 26 ] 2>/dev/null && echo build/wa-transcribe)
+
+build: $(APP)/Contents/MacOS/WAExport $(TRANSCRIBER)
+	@[ -n "$(TRANSCRIBER)" ] || echo "Skipped build/wa-transcribe (voice notes): it needs Command Line Tools 26 or later."
 
 # Voice-note transcriber: no Full Disk Access, no bundle; needs macOS 26 at run time (it says so before).
 build/wa-transcribe: transcriber/main.swift Makefile

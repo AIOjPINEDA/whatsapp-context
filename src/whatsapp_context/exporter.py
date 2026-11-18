@@ -163,10 +163,10 @@ def _is_fresh(status: dict) -> bool:
 
 
 @contextmanager
-def _lock() -> Iterator[None]:
-    """Serialises exports across threads and across the MCP processes of several clients."""
+def _lock(name: str = "refresh.lock") -> Iterator[None]:
+    """Serialises exports (or transcriptions) across threads and the MCP processes of several clients."""
     _prepare_data_dir()
-    with os.fdopen(os.open(paths.data_dir() / "refresh.lock", os.O_RDWR | os.O_CREAT, 0o600)) as handle:
+    with os.fdopen(os.open(paths.data_dir() / name, os.O_RDWR | os.O_CREAT, 0o600)) as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)  # released when the file closes
         yield
 
@@ -260,7 +260,8 @@ def transcriber() -> Path:
 
 def _transcriber_lines(args: list[str], timeout: float) -> list[dict]:
     if not transcriber().exists():
-        raise ExportError(f"{transcriber()} not found: run `make build` in {paths.REPO}.")
+        raise ExportError(f"{transcriber()} not found: it needs macOS 26 and Command Line Tools 26 or later "
+                          f"(`softwareupdate --list`), then `make build` in {paths.REPO}.")
     proc = subprocess.run([str(transcriber()), *args], capture_output=True, text=True, timeout=timeout, check=False)
     items = []
     for line in proc.stdout.splitlines():
@@ -303,26 +304,11 @@ def transcribe(chat: str, since: datetime | None = None, until: datetime | None 
     todo = [n for n in notes if n["Z_PK"] not in cached and n["media_path"] and n not in too_long]
     done, failed, not_downloaded, audio = [], 0, len(missing), paths.data_dir() / "audio"
     if todo:
-        try:
-            _empty(audio)  # leftovers of an interrupted run
-            copy = copy_audio([n["Z_PK"] for n in todo])
-            if not copy.get("ok"):
-                raise ExportError(f"WAExport could not copy the voice notes: {copy.get('error', 'unknown error')}")
-            files = {c["file"]: c["pk"] for c in copy.get("copied", [])}
-            gone = sum(s.get("reason") == "not downloaded" for s in copy.get("skipped", []))  # path but no file
-            not_downloaded += gone
-            failed += len(todo) - len(files) - gone
-            if files:
-                seconds = sum(n["media_seconds"] or 0 for n in todo)
-                items = _transcriber_lines([locale, *(str(audio / f) for f in files)], timeout=60 + seconds / 5)
-                for item in items:
-                    if item.get("file") in files and "text" in item:
-                        done.append({**item, "pk": files[item["file"]]})
-                failed += len(files) - len(done)
-        finally:
-            _empty(audio)
-        transcripts.save(done)
-    lines = [f"Transcribed {plural(len(done), 'voice note')} on this Mac ({locale}); "
+        with _lock("transcribe.lock"):  # one run at a time: they share data/audio
+            done, failed, gone = _transcribe(todo, locale, audio)
+        not_downloaded += gone
+    lines = [
+f"Transcribed {plural(len(done), 'voice note')} on this Mac ({locale}); "
              f"{len(notes) - len(todo) - len(missing) - len(too_long)} already had a transcript."]
     if not_downloaded:
         lines.append(f"{plural(not_downloaded, 'voice note')} not downloaded on this Mac: play them once in WhatsApp.")
@@ -332,6 +318,28 @@ def transcribe(chat: str, since: datetime | None = None, until: datetime | None 
         lines.append(f"{plural(failed, 'voice note')} could not be transcribed.")
     with connect() as conn:
         return "\n".join(lines) + "\n\n" + Store(conn).messages(chat, since, until)
+
+
+def _transcribe(todo: list, locale: str, audio: Path) -> tuple[list[dict], int, int]:
+    """Copy, transcribe, delete, save: returns (transcribed, failed, not downloaded)."""
+    done: list[dict] = []
+    try:
+        _empty(audio)  # leftovers of an interrupted run
+        copy = copy_audio([n["Z_PK"] for n in todo])
+        if not copy.get("ok"):
+            raise ExportError(f"WAExport could not copy the voice notes: {copy.get('error', 'unknown error')}")
+        files = {c["file"]: c["pk"] for c in copy.get("copied", [])}
+        gone = sum(s.get("reason") == "not downloaded" for s in copy.get("skipped", []))  # path but no file
+        if files:
+            seconds = sum(n["media_seconds"] or 0 for n in todo)
+            for item in _transcriber_lines([locale, *(str(audio / f) for f in files)], timeout=60 + seconds / 5):
+                if item.get("file") in files and "text" in item:
+                    done.append({**item, "pk": files[item["file"]]})
+    finally:
+        _empty(audio)
+    with _lock(), connect() as conn:  # a revoke exported meanwhile must win: keep only what is still there
+        done = transcripts.save(done, conn)
+    return done, len(todo) - len(done) - gone, gone
 
 
 def _empty(folder: Path) -> None:

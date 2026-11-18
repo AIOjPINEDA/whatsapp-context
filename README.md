@@ -102,8 +102,9 @@ days = 180
 
 ## Voice notes (optional, macOS 26+)
 
-Voice notes can be transcribed **on your Mac** with Apple's speech engine: no network, no cloud. It is
-off until you name a language in `config/policy.toml`:
+Voice notes can be transcribed **on your Mac** with Apple's speech engine: no network, no cloud. It needs
+Command Line Tools 26 or later (older ones build everything else). It is off until you name a language in
+`config/policy.toml`, **after** restarting your assistants on this version (an older server rejects the key):
 
 ```toml
 [options]

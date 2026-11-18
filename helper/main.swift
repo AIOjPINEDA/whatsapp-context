@@ -239,14 +239,26 @@ func copyAudio(source: String, data: String) throws -> [String: Any] {
         ?? Selection()
     let request = fm.contents(atPath: data + "/audio-request.json").flatMap { try? JSONDecoder().decode(Request.self, from: $0) }
         ?? Request()
+    // Names can be swapped for links between a check and a use, so both ends are checked on the open
+    // descriptor: the copies land in data/audio and nowhere else, and are read from inside the container.
     let dir = data + "/audio"
+    mkdir(dir, 0o700)
+    let folder = open(dir, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+    guard folder >= 0 else { throw Failure(kind: "write", message: "\(dir) is not a folder") }
+    defer { close(folder) }
+    guard let real = realPath(folder), allowed((real as NSString).deletingLastPathComponent, defaultData),
+          (real as NSString).lastPathComponent == "audio" else {
+        throw Failure(kind: "write", message: "\(dir) is not inside the data folder")
+    }
+    guard let resolved = realpath(source, nil) else { throw Failure(kind: "open", message: "\(source): not found") }
+    let root = String(cString: resolved) + "/"  // realpath, like F_GETPATH, keeps /private (Foundation drops it)
+    free(resolved)
     var info = stat()
-    if lstat(dir, &info) == 0 && (info.st_mode & S_IFMT) != S_IFDIR { throw Failure(kind: "write", message: "\(dir) is not a folder") }
-    try? fm.createDirectory(atPath: dir, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-    let root = URL(fileURLWithPath: source).resolvingSymlinksInPath().path + "/"
+    let deadline = Date().addingTimeInterval(120)  // finish well before the caller stops waiting (180 s)
     let jids = String(data: try JSONEncoder().encode(selection.jids), encoding: .utf8) ?? "[]"
     var copied: [[String: Any]] = [], skipped: [[String: Any]] = []
     for pk in request.pks.prefix(100) {
+        guard Date() < deadline else { skipped.append(["pk": pk, "reason": "out of time"]); continue }
         var stmt: OpaquePointer?
         defer { sqlite3_finalize(stmt) }
         let sql = """
@@ -267,19 +279,21 @@ func copyAudio(source: String, data: String) throws -> [String: Any] {
             skipped.append(["pk": pk, "reason": "unsupported file"]); continue
         }
         // WhatsApp stores paths relative to its Message folder; fall back to the container root.
-        guard let src = [source + "/Message/" + rel, source + "/" + rel].first(where: { fm.fileExists(atPath: $0) }),
-              URL(fileURLWithPath: src).resolvingSymlinksInPath().path.hasPrefix(root) else {
+        guard let src = [source + "/Message/" + rel, source + "/" + rel].first(where: { fm.fileExists(atPath: $0) }) else {
             skipped.append(["pk": pk, "reason": "not downloaded"]); continue
         }
-        let input = open(src, O_RDONLY | O_NOFOLLOW)
+        let input = open(src, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)  // a FIFO must not block the helper
         guard input >= 0 else { skipped.append(["pk": pk, "reason": "unreadable"]); continue }
         defer { close(input) }
+        guard let opened = realPath(input), opened.hasPrefix(root) else {
+            skipped.append(["pk": pk, "reason": "unreadable"]); continue
+        }
         guard fstat(input, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG, info.st_size <= 16 << 20 else {
             skipped.append(["pk": pk, "reason": "too large"]); continue
         }
         let name = "\(pk).\(ext)"
-        unlink(dir + "/" + name)
-        let output = open(dir + "/" + name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
+        unlinkat(folder, name, 0)
+        let output = openat(folder, name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
         guard output >= 0 else { throw Failure(kind: "write", message: "\(name): \(String(cString: strerror(errno)))") }
         defer { close(output) }
         let bytes = FileHandle(fileDescriptor: input).readDataToEndOfFile()
@@ -289,6 +303,12 @@ func copyAudio(source: String, data: String) throws -> [String: Any] {
         copied.append(["pk": pk, "file": name])
     }
     return ["copied": copied, "skipped": skipped]
+}
+
+/// Where an open descriptor really is (F_GETPATH), whatever name was used to open it.
+func realPath(_ fd: Int32) -> String? {
+    var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+    return fcntl(fd, F_GETPATH, &buffer) == 0 ? String(cString: buffer) : nil
 }
 
 func writeStatus(_ status: [String: Any], to data: String, file: String = "status.json") {
