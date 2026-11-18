@@ -31,7 +31,12 @@ setup:
 grant:
 	@INSTALLED="$(INSTALLED)" scripts/grant.sh
 
-build: $(APP)/Contents/MacOS/WAExport
+build: $(APP)/Contents/MacOS/WAExport build/wa-transcribe
+
+# Voice-note transcriber: no Full Disk Access, no bundle; needs macOS 26 at run time (it says so before).
+build/wa-transcribe: transcriber/main.swift Makefile
+	mkdir -p build
+	swiftc -O -target $(ARCH)-apple-macos$(MACOS_MIN) -o $@ transcriber/main.swift
 
 $(APP)/Contents/MacOS/WAExport: helper/main.swift helper/Info.plist Makefile
 	@[ -n "$(MACOS_MIN)" ] || { echo "helper/Info.plist has no LSMinimumSystemVersion" >&2; exit 1; }

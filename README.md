@@ -100,6 +100,27 @@ days = 180
 - Search returns 50 results, most recent first, and says when it stopped; raise it with
   `uv run wa search "quote" --limit 200`.
 
+## Voice notes (optional, macOS 26+)
+
+Voice notes can be transcribed **on your Mac** with Apple's speech engine: no network, no cloud. It is
+off until you name a language in `config/policy.toml`:
+
+```toml
+[options]
+transcribe = "es-ES"   # or en-US, fr-FR...
+```
+
+Install that language's model once with `uv run wa transcribe --install` (a few hundred MB, from Apple).
+Then ask *"transcribe the voice notes in Book club since Monday"*, or run
+`uv run wa transcribe "Book club" --limit 20`.
+
+- Only voice notes of allowed chats, inside the policy's days, already downloaded by WhatsApp, up to
+  15 minutes each and 100 per call. Nothing happens until you or the assistant ask.
+- WAExport copies each note to the export folder, the engine reads it and the copy is deleted at once.
+  Only the text is kept (`transcripts.sqlite`, `0600`), and a transcript goes when its message leaves the
+  export (revoked, excluded or older than `days`).
+- Transcripts can be wrong, and the assistant is told so: check names, numbers and doses against the audio.
+
 ## Supported assistants
 
 | Assistant | Register with |
@@ -135,6 +156,7 @@ Then remove WAExport from Full Disk Access and delete the folder.
 | You see | Do this |
 |---|---|
 | `WAExport has no Full Disk Access` | `make grant`: it opens the list and Finder, and waits until you switch WAExport on |
+| `speech model for ... is not installed` | `uv run wa transcribe --install` |
 | It stopped working after an update | WAExport is signed ad hoc, so a new build loses the grant: remove it (-) and add it again (+) |
 | *You can't use this version of the application "WAExport"* or `error -10825` | Built before 0.2.1: `git pull`, then `make setup` |
 | `(is WhatsApp open on this Mac?)` | Open WhatsApp for Mac and let it sync |

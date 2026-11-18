@@ -10,13 +10,14 @@ served over MCP (stdio) to local assistants.
 
 | Path | What it is |
 |---|---|
-| `helper/main.swift` | **WAExport**, the only code with Full Disk Access: read-only snapshot into `~/.local/share/whatsapp-context/wa.sqlite`. Changing it, its `Info.plist` or its build flags forces every user to re-grant Full Disk Access. |
+| `helper/main.swift` | **WAExport**, the only code with Full Disk Access: read-only snapshot into `~/.local/share/whatsapp-context/wa.sqlite` and, with the `audio` verb, copies of requested voice notes. Changing it, its `Info.plist` or its build flags forces every user to re-grant Full Disk Access. |
 | `src/whatsapp_context/exporter.py` | Runs WAExport via `open`, keeps the export fresh, status `report()`, Full Disk Access canary. |
 | `src/whatsapp_context/policy.py` | Parses and validates `config/policy.toml` + `config/policy-claude.toml`; resolves chats. |
 | `src/whatsapp_context/policy_edit.py` | `whatsapp_allow` / `revoke` / `exclude`: writes JIDs to `config/policy-claude.toml` only, under a file lock. |
 | `src/whatsapp_context/store.py` | Read-only queries on the export and all text output. |
+| `src/whatsapp_context/transcripts.py` · `transcriber/main.swift` | Voice-note transcripts cache (text only, pruned per export) · `wa-transcribe`, Apple SpeechTranscriber (macOS 26+), no Full Disk Access. |
 | `src/whatsapp_context/text.py` · `paths.py` | Dates and decoding · locations and private writes. |
-| `src/whatsapp_context/mcp_server.py` · `cli.py` | MCP server (8 tools) · `wa` CLI. |
+| `src/whatsapp_context/mcp_server.py` · `cli.py` | MCP server (9 tools) · `wa` CLI. |
 | `scripts/setup.sh` · `grant.sh` · `register.py` | `make setup` (bash 3.2) · `make grant`, the Full Disk Access step · client registration and `remove`. |
 | `tests/` | pytest on a synthetic WhatsApp container; `test_guards.py` holds the ratchets. |
 | `docs/` | GitHub Pages site (`index.html`, one file, no external requests); `assets/banner.png` is rendered from `banner.svg`. |

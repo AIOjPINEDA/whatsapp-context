@@ -11,7 +11,7 @@
 import Foundation
 import SQLite3
 
-let helperVersion = "0.2.1"
+let helperVersion = "0.3.0"
 let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 struct Failure: Error {
@@ -220,9 +220,80 @@ func export(source: String, data: String) throws -> [String: Any] {
     return ["chats": chats, "messages": messages, "selected": selection.jids.count, "exported_at": exportedAt]
 }
 
-func writeStatus(_ status: [String: Any], to data: String) {
+/// `audio` verb: copies the voice notes listed in audio-request.json into data/audio, one file per message.
+/// The helper checks each one against selection.json itself (allowed chat, inside the window, a voice note),
+/// so a forged request cannot reach other chats. Only .opus/.m4a, regular files up to 16 MB, never symlinks.
+func copyAudio(source: String, data: String) throws -> [String: Any] {
+    struct Request: Decodable { var pks: [Int64] = [] }
+    let chatStorage = source + "/ChatStorage.sqlite"
+    try preflight(chatStorage)
+    var mem: OpaquePointer?
+    defer { sqlite3_close(mem) }
+    guard sqlite3_open_v2(":memory:", &mem, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil) == SQLITE_OK else {
+        throw Failure(kind: "open", message: "memory: \(errorMessage(mem))")
+    }
+    try snapshot(chatStorage, into: mem, schema: "main")
+    try require(mem, "main", "ZWAMEDIAITEM", ["ZMESSAGE", "ZMEDIALOCALPATH"])
+    let fm = FileManager.default
+    let selection = fm.contents(atPath: data + "/selection.json").flatMap { try? JSONDecoder().decode(Selection.self, from: $0) }
+        ?? Selection()
+    let request = fm.contents(atPath: data + "/audio-request.json").flatMap { try? JSONDecoder().decode(Request.self, from: $0) }
+        ?? Request()
+    let dir = data + "/audio"
+    var info = stat()
+    if lstat(dir, &info) == 0 && (info.st_mode & S_IFMT) != S_IFDIR { throw Failure(kind: "write", message: "\(dir) is not a folder") }
+    try? fm.createDirectory(atPath: dir, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+    let root = URL(fileURLWithPath: source).resolvingSymlinksInPath().path + "/"
+    let jids = String(data: try JSONEncoder().encode(selection.jids), encoding: .utf8) ?? "[]"
+    var copied: [[String: Any]] = [], skipped: [[String: Any]] = []
+    for pk in request.pks.prefix(100) {
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        let sql = """
+            SELECT mi.ZMEDIALOCALPATH FROM main.ZWAMESSAGE m JOIN main.ZWAMEDIAITEM mi ON mi.Z_PK = m.ZMEDIAITEM
+            WHERE m.Z_PK = ?1 AND m.ZMESSAGETYPE = 3 AND m.ZMESSAGEDATE >= ?2 AND m.ZCHATSESSION IN (
+                SELECT Z_PK FROM main.ZWACHATSESSION WHERE ZCONTACTJID IN (SELECT value FROM json_each(?3)))
+            """
+        guard sqlite3_prepare_v2(mem, sql, -1, &stmt, nil) == SQLITE_OK else { throw Failure(kind: "sql", message: errorMessage(mem)) }
+        sqlite3_bind_int64(stmt, 1, pk)
+        sqlite3_bind_double(stmt, 2, selection.since)
+        sqlite3_bind_text(stmt, 3, jids, -1, sqliteTransient)
+        guard sqlite3_step(stmt) == SQLITE_ROW, let raw = sqlite3_column_text(stmt, 0) else {
+            skipped.append(["pk": pk, "reason": "not an allowed voice note"]); continue
+        }
+        let rel = String(cString: raw)
+        let ext = (rel as NSString).pathExtension.lowercased()
+        guard !rel.isEmpty, !rel.hasPrefix("/"), !rel.split(separator: "/").contains(".."), ["opus", "m4a"].contains(ext) else {
+            skipped.append(["pk": pk, "reason": "unsupported file"]); continue
+        }
+        // WhatsApp stores paths relative to its Message folder; fall back to the container root.
+        guard let src = [source + "/Message/" + rel, source + "/" + rel].first(where: { fm.fileExists(atPath: $0) }),
+              URL(fileURLWithPath: src).resolvingSymlinksInPath().path.hasPrefix(root) else {
+            skipped.append(["pk": pk, "reason": "not downloaded"]); continue
+        }
+        let input = open(src, O_RDONLY | O_NOFOLLOW)
+        guard input >= 0 else { skipped.append(["pk": pk, "reason": "unreadable"]); continue }
+        defer { close(input) }
+        guard fstat(input, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG, info.st_size <= 16 << 20 else {
+            skipped.append(["pk": pk, "reason": "too large"]); continue
+        }
+        let name = "\(pk).\(ext)"
+        unlink(dir + "/" + name)
+        let output = open(dir + "/" + name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
+        guard output >= 0 else { throw Failure(kind: "write", message: "\(name): \(String(cString: strerror(errno)))") }
+        defer { close(output) }
+        let bytes = FileHandle(fileDescriptor: input).readDataToEndOfFile()
+        guard bytes.withUnsafeBytes({ write(output, $0.baseAddress, $0.count) }) == bytes.count else {
+            throw Failure(kind: "write", message: "\(name): short write")
+        }
+        copied.append(["pk": pk, "file": name])
+    }
+    return ["copied": copied, "skipped": skipped]
+}
+
+func writeStatus(_ status: [String: Any], to data: String, file: String = "status.json") {
     if let json = try? JSONSerialization.data(withJSONObject: status, options: [.prettyPrinted, .sortedKeys]) {
-        try? json.write(to: URL(fileURLWithPath: data + "/status.json"), options: .atomic)
+        try? json.write(to: URL(fileURLWithPath: data + "/" + file), options: .atomic)
     }
 }
 
@@ -235,6 +306,7 @@ let defaultData = home + "/.local/share/whatsapp-context"
 var source = defaultSource
 var data = defaultData
 var runID = ""
+var verb = "export"
 var args = Array(CommandLine.arguments.dropFirst())
 while let arg = args.first {
     args.removeFirst()
@@ -243,7 +315,8 @@ while let arg = args.first {
     case "--data": data = args.isEmpty ? data : args.removeFirst()
     case "--run": runID = args.isEmpty ? "" : args.removeFirst()
     case "--version": print(helperVersion); exit(0)
-    default: break  // "export" is the only verb
+    case "audio": verb = "audio"
+    default: break  // "export" is the default verb
     }
 }
 
@@ -275,23 +348,24 @@ try? FileManager.default.createDirectory(atPath: data, withIntermediateDirectori
 
 var status: [String: Any] = ["run": runID, "helper_version": helperVersion,
                              "sqlite_version": String(cString: sqlite3_libversion())]
+let statusFile = verb == "audio" ? "audio.json" : "status.json"
 do {
-    let result = try export(source: source, data: data)
+    let result = verb == "audio" ? try copyAudio(source: source, data: data) : try export(source: source, data: data)
     status.merge(result) { _, new in new }
     status["ok"] = true
-    writeStatus(status, to: data)
+    writeStatus(status, to: data, file: statusFile)
     exit(0)
 } catch let failure as Failure {
     status["ok"] = false
     status["error_kind"] = failure.kind
     status["error"] = failure.message
     status["failed_at"] = ISO8601DateFormatter().string(from: Date())
-    writeStatus(status, to: data)
+    writeStatus(status, to: data, file: statusFile)
     exit(failure.kind == "fda_denied" ? 77 : 1)
 } catch {
     status["ok"] = false
     status["error_kind"] = "other"
     status["error"] = "\(error)"
-    writeStatus(status, to: data)
+    writeStatus(status, to: data, file: statusFile)
     exit(1)
 }

@@ -124,6 +124,10 @@ uv run wa status
 Expected: no `Policy entry with no match:` or `Policy conflict:` lines; fix each with the user
 (*ambiguous* means use the phone number or the JID). An empty policy is fine if the user wants to decide later.
 
+Optional, only if the user asks for voice notes and `sw_vers -productVersion` is 26 or later: ask which
+language they speak in their notes, set `transcribe = "<language>"` (e.g. `es-ES`) under `[options]`, and
+run `uv run wa transcribe --install`. Expected: `Speech model for <language> is installed.`
+
 ## 8. Register the assistants the user uses
 
 | Client | Command | Expected |

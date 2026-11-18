@@ -21,7 +21,8 @@ PHONE = "@s.whatsapp.net"
 LID = "@lid"
 JID_RE = re.compile(r"[\w.+-]+@(g\.us|s\.whatsapp\.net|lid|broadcast)")
 
-SECTION_KEYS = {"content": {"chats", "people"}, "exclude": {"chats"}, "options": {"days"}}
+SECTION_KEYS = {"content": {"chats", "people"}, "exclude": {"chats"}, "options": {"days", "transcribe"}}
+LANGUAGE = re.compile(r"[A-Za-z]{2,3}([-_][A-Za-z0-9]{2,8})*")  # e.g. es, es-ES, pt_BR
 PROJECT_KEYS = {"context", "repo", "chats", "people", "patterns"}
 
 
@@ -42,6 +43,7 @@ class Policy:
     exclude: tuple[str, ...] = ()
     days: int = 180
     projects: tuple[Project, ...] = ()
+    transcribe: str = ""  # voice-note language (e.g. "es-ES"); empty: transcription is off
 
 
 @dataclass
@@ -115,8 +117,11 @@ def parse_policy(data: dict, path: Path) -> Policy:
     days = options.get("days", 180)
     if isinstance(days, bool) or not isinstance(days, int) or days < 1:
         raise ValueError(f'{path.name}: [options] "days" must be a positive whole number')
+    transcribe = options.get("transcribe", "")
+    if not isinstance(transcribe, str) or (transcribe and not LANGUAGE.fullmatch(transcribe)):
+        raise ValueError(f'{path.name}: [options] "transcribe" must be a language like "es-ES", or "" (off)')
     return Policy(_strings(content, "chats", path), _strings(content, "people", path),
-                  _strings(exclude, "chats", path), days, tuple(projects))
+                  _strings(exclude, "chats", path), days, tuple(projects), transcribe)
 
 
 def load_policy(path: Path) -> Policy:

@@ -2,10 +2,11 @@
 
 import argparse
 import sqlite3
+import subprocess
 import sys
 
 from . import paths
-from .exporter import describe, ensure_fresh, refresh, report, with_canary
+from .exporter import describe, ensure_fresh, install_language, refresh, report, transcribe, with_canary
 from .store import NO_EXPORT, ChatNotFound, Store, connect
 from .text import parse_local, parse_until
 
@@ -33,12 +34,24 @@ def parser() -> argparse.ArgumentParser:
     search.add_argument("--since", help="YYYY-MM-DD")
     search.add_argument("--project", help="limit to one project")
     search.add_argument("--limit", type=int, default=50, help="maximum results, most recent first (default 50)")
+    voice = sub.add_parser("transcribe", help="transcribe the voice notes of one allowed chat on this Mac")
+    voice.add_argument("chat", nargs="?", help="chat name (or part of it)")
+    voice.add_argument("--since", help="YYYY-MM-DD or 'YYYY-MM-DD HH:MM'")
+    voice.add_argument("--until", help="YYYY-MM-DD (includes that day) or 'YYYY-MM-DD HH:MM'")
+    voice.add_argument("--limit", type=int, default=20, help="maximum voice notes, most recent first (default 20)")
+    voice.add_argument("--install", action="store_true", help="download the speech model for your language")
     return root
 
 
 def _run(args: argparse.Namespace) -> tuple[int, str]:
     if args.cmd == "status" and not paths.export_db().exists():
         return 1, NO_EXPORT
+    if args.cmd == "transcribe":
+        if args.install:
+            return 0, install_language()
+        if not args.chat:
+            return 2, "wa transcribe needs a chat name (or --install)."
+        return 0, transcribe(args.chat, parse_local(args.since), parse_until(args.until), args.limit)
     if args.cmd in ("refresh", "status"):
         ok, text = report(refresh() if args.cmd == "refresh" else ensure_fresh())
         return (0 if ok else 1), text
@@ -60,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
         code, text = _run(args)
-    except (OSError, ChatNotFound, ValueError, sqlite3.Error) as exc:
+    except (OSError, ChatNotFound, ValueError, sqlite3.Error, subprocess.TimeoutExpired) as exc:
         print(with_canary(str(exc)), file=sys.stderr)
         return 1
     print(with_canary(text))

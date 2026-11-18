@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.0
+
+**This release changes WAExport.** After `git pull`, run `make setup`; at its Full Disk Access step,
+remove WAExport from the list (-) and drag it in again (`make grant` does only that step).
+
+- Voice notes can be transcribed on the Mac with Apple's SpeechTranscriber (macOS 26 or later): no
+  network, off until `[options] transcribe = "<language>"` names a language. New `wa transcribe`
+  (`--install` downloads the language model once) and MCP tool `whatsapp_transcribe`.
+- WAExport has a second verb, `audio`: it copies only the requested voice notes (Ogg Opus or M4A, up to
+  16 MB) of allowed chats inside the policy's days, rejecting other paths, links and files. The copies are
+  deleted right after transcribing; only the text is cached in `transcripts.sqlite` (`0600`), pruned after
+  every export so revoked, excluded or expired chats lose their transcripts too.
+- `build/wa-transcribe`, the transcriber, has no Full Disk Access: it only reads the copies it is given.
+- Messages show a voice note's length and whether it is transcribed, not downloaded or pending; search
+  also looks inside transcripts.
+- WAExport reports version 0.3.0.
+
 ## 0.2.1
 
 **This release changes WAExport.** After `git pull`, run `make setup`; at its Full Disk Access step,

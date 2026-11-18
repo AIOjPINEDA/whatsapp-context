@@ -100,6 +100,27 @@ days = 180
 - La búsqueda devuelve 50 resultados, los más recientes, y avisa cuando se corta; súbelo con
   `uv run wa search "presupuesto" --limit 200`.
 
+## Notas de voz (opcional, macOS 26+)
+
+Las notas de voz se pueden transcribir **en tu Mac** con el motor de voz de Apple: sin red ni nube. Está
+desactivado hasta que pongas un idioma en `config/policy.toml`:
+
+```toml
+[options]
+transcribe = "es-ES"   # o en-US, fr-FR...
+```
+
+Instala una vez el modelo de ese idioma con `uv run wa transcribe --install` (unos cientos de MB, de
+Apple). Después pide *"transcribe las notas de voz del Club de lectura desde el lunes"* o ejecuta
+`uv run wa transcribe "Club de lectura" --limit 20`.
+
+- Solo notas de voz de chats permitidos, dentro de los días de la política, ya descargadas por WhatsApp,
+  de hasta 15 minutos cada una y 100 por llamada. No pasa nada hasta que tú o el asistente lo pidáis.
+- WAExport copia cada nota a la carpeta de la exportación, el motor la lee y la copia se borra al momento.
+  Solo se guarda el texto (`transcripts.sqlite`, `0600`), y una transcripción desaparece cuando su mensaje
+  sale de la exportación (revocado, excluido o más antiguo que `days`).
+- Las transcripciones pueden tener errores, y el asistente lo sabe: comprueba nombres, cifras y dosis con el audio.
+
 ## Asistentes compatibles
 
 | Asistente | Se registra con |
@@ -134,6 +155,7 @@ Después quita WAExport del Acceso total al disco y borra la carpeta.
 
 | Si ves | Haz esto |
 |---|---|
+| `speech model for ... is not installed` | `uv run wa transcribe --install` |
 | `WAExport has no Full Disk Access` | `make grant`: abre la lista y Finder, y espera a que actives WAExport |
 | Dejó de funcionar tras actualizar | WAExport va firmado ad hoc y una compilación nueva pierde el permiso: quítalo (-) y vuelve a añadirlo (+) |
 | *No se puede usar esta versión de la aplicación «WAExport» con esta versión de macOS* (en inglés: *You can't use this version…*) o `error -10825` | Compilado antes de la 0.2.1: `git pull` y luego `make setup` |
