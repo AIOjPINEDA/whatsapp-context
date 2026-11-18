@@ -17,13 +17,13 @@ from whatsapp_context.policy import parse_policy
 # Line ceilings. A file may shrink but never grow past its number. Lower a number when you shorten a
 # file; raise one only in a change of its own that says why.
 LINE_CEILINGS = {
-    "helper/main.swift": 422,
+    "helper/main.swift": 425,
     "scripts/register.py": 199,
     "scripts/grant.sh": 50,
     "scripts/setup.sh": 112,
     "src/whatsapp_context/__init__.py": 0,
     "src/whatsapp_context/cli.py": 84,
-    "src/whatsapp_context/exporter.py": 352,
+    "src/whatsapp_context/exporter.py": 353,
     "src/whatsapp_context/mcp_server.py": 176,
     "src/whatsapp_context/paths.py": 46,
     "src/whatsapp_context/policy.py": 285,

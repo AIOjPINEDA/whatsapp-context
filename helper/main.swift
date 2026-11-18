@@ -224,7 +224,8 @@ func export(source: String, data: String) throws -> [String: Any] {
 /// The helper checks each one against selection.json itself (allowed chat, inside the window, a voice note),
 /// so a forged request cannot reach other chats. Only .opus/.m4a, regular files up to 16 MB, never symlinks.
 func copyAudio(source: String, data: String) throws -> [String: Any] {
-    struct Request: Decodable { var pks: [Int64] = [] }
+    struct Note: Decodable { var pk: Int64; var stanza: String }  // both: a restored database can reuse a Z_PK
+    struct Request: Decodable { var notes: [Note] = [] }
     let deadline = Date().addingTimeInterval(100)  // no copy is written after this (the caller waits 180 s)
     // The container is pinned by descriptor first; every note must really be inside it when opened.
     let container = open(source, O_RDONLY | O_DIRECTORY)
@@ -261,19 +262,21 @@ func copyAudio(source: String, data: String) throws -> [String: Any] {
     var info = stat()
     let jids = String(data: try JSONEncoder().encode(selection.jids), encoding: .utf8) ?? "[]"
     var copied: [[String: Any]] = [], skipped: [[String: Any]] = []
-    for pk in request.pks.prefix(100) {
+    for note in request.notes.prefix(100) {
+        let pk = note.pk
         guard Date() < deadline else { skipped.append(["pk": pk, "reason": "out of time"]); continue }
         var stmt: OpaquePointer?
         defer { sqlite3_finalize(stmt) }
         let sql = """
             SELECT mi.ZMEDIALOCALPATH FROM main.ZWAMESSAGE m JOIN main.ZWAMEDIAITEM mi ON mi.Z_PK = m.ZMEDIAITEM
-            WHERE m.Z_PK = ?1 AND m.ZMESSAGETYPE = 3 AND m.ZMESSAGEDATE >= ?2 AND m.ZCHATSESSION IN (
+            WHERE m.Z_PK = ?1 AND m.ZSTANZAID = ?4 AND m.ZMESSAGETYPE = 3 AND m.ZMESSAGEDATE >= ?2 AND m.ZCHATSESSION IN (
                 SELECT Z_PK FROM main.ZWACHATSESSION WHERE ZCONTACTJID IN (SELECT value FROM json_each(?3)))
             """
         guard sqlite3_prepare_v2(mem, sql, -1, &stmt, nil) == SQLITE_OK else { throw Failure(kind: "sql", message: errorMessage(mem)) }
         sqlite3_bind_int64(stmt, 1, pk)
         sqlite3_bind_double(stmt, 2, selection.since)
         sqlite3_bind_text(stmt, 3, jids, -1, sqliteTransient)
+        sqlite3_bind_text(stmt, 4, note.stanza, -1, sqliteTransient)
         guard sqlite3_step(stmt) == SQLITE_ROW, let raw = sqlite3_column_text(stmt, 0) else {
             skipped.append(["pk": pk, "reason": "not an allowed voice note"]); continue
         }
@@ -306,7 +309,7 @@ func copyAudio(source: String, data: String) throws -> [String: Any] {
         guard bytes.withUnsafeBytes({ write(output, $0.baseAddress, $0.count) }) == bytes.count else {
             throw Failure(kind: "write", message: "\(name): short write")
         }
-        copied.append(["pk": pk, "file": name])
+        copied.append(["pk": pk, "stanza": note.stanza, "file": name])
     }
     return ["copied": copied, "skipped": skipped]
 }

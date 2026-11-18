@@ -60,7 +60,7 @@ def test_helper_copies_only_allowed_voice_notes(env):
     big = voice(env, 27, 1, "Media/111/big.opus", content=b"")
     os.truncate(env["source"] / "Message" / "Media" / "111" / "big.opus", 17 << 20)
     exporter.refresh()
-    result = exporter.copy_audio([ok, other_chat, excluded, escape, link, pdf, missing, big])
+    result = exporter.copy_audio({pk: f"V{pk}" for pk in [ok, other_chat, excluded, escape, link, pdf, missing, big]})
     assert result["ok"] and [c["pk"] for c in result["copied"]] == [ok]
     reasons = {s["pk"]: s["reason"] for s in result["skipped"]}
     assert reasons[other_chat] == reasons[excluded] == "not an allowed voice note"
@@ -151,7 +151,7 @@ def test_helper_never_writes_through_a_swapped_audio_folder(env, tmp_path):
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     (env["data"] / "audio").symlink_to(elsewhere)
-    result = exporter.copy_audio([ok])
+    result = exporter.copy_audio({ok: f"V{ok}"})
     assert not result["ok"] and list(elsewhere.iterdir()) == []
 
 
@@ -166,7 +166,7 @@ def test_helper_rejects_notes_reached_through_a_linked_folder_or_fifo(env, tmp_p
     (env["source"] / "Message" / "Media" / "111").mkdir(parents=True, exist_ok=True)
     os.mkfifo(env["source"] / "Message" / "Media" / "111" / "fifo.opus")
     exporter.refresh()
-    result = exporter.copy_audio([linked, fifo])  # returns: the FIFO does not block the helper
+    result = exporter.copy_audio({linked: f"V{linked}", fifo: f"V{fifo}"})  # the FIFO does not block it
     assert result["ok"] and result["copied"] == []
     assert list((env["data"] / "audio").iterdir()) == []
 
@@ -198,3 +198,12 @@ def test_a_reused_message_id_does_not_inherit_a_transcript(voice_env):
     assert transcripts.load() == {}
     with connect() as conn:
         assert "[audio 0:23 · not transcribed]" in Store(conn).messages("Grupo Proyecto")
+
+
+def test_the_helper_checks_the_stanza_id_too(voice_env):
+    voice(voice_env, 20, 1, "Media/111/nota.opus")
+    exporter.refresh()  # the export still knows message 20 as V20
+    voice_env["writer"].execute("UPDATE ZWAMESSAGE SET ZSTANZAID = 'OTHER' WHERE Z_PK = 20")
+    voice_env["writer"].commit()
+    result = exporter.copy_audio({20: "V20"})
+    assert result["copied"] == [] and result["skipped"][0]["reason"] == "not an allowed voice note"

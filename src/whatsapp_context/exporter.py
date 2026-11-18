@@ -133,10 +133,11 @@ def _export() -> dict:
     return status
 
 
-def copy_audio(pks: list[int]) -> dict:
-    """Have WAExport copy these voice notes into data/audio; it re-checks each against the selection."""
+def copy_audio(notes: dict[int, str]) -> dict:
+    """Have WAExport copy these voice notes ({Z_PK: stanza ID}) into data/audio; it re-checks each one."""
     with _lock():
-        paths.write_private(paths.data_dir() / "audio-request.json", json.dumps({"pks": pks}))
+        request = {"notes": [{"pk": pk, "stanza": stanza} for pk, stanza in notes.items()]}
+        paths.write_private(paths.data_dir() / "audio-request.json", json.dumps(request))
         try:
             return run_helper("audio")
         finally:
@@ -326,17 +327,17 @@ def _transcribe(todo: list, locale: str, audio: Path) -> tuple[list[dict], int, 
     done: list[dict] = []
     try:
         _empty(audio)  # leftovers of an interrupted run
-        copy = copy_audio([n["Z_PK"] for n in todo])
+        copy = copy_audio({n["Z_PK"]: n["ZSTANZAID"] for n in todo if n["ZSTANZAID"]})
         if not copy.get("ok"):
             raise ExportError(f"WAExport could not copy the voice notes: {copy.get('error', 'unknown error')}")
-        files = {c["file"]: c["pk"] for c in copy.get("copied", [])}
-        stanzas = {n["Z_PK"]: n["ZSTANZAID"] for n in todo}
+        files = {c["file"]: (c["pk"], c["stanza"]) for c in copy.get("copied", [])}
         gone = sum(s.get("reason") == "not downloaded" for s in copy.get("skipped", []))  # path but no file
         if files:
             seconds = sum(n["media_seconds"] or 0 for n in todo)
             for item in _transcriber_lines([locale, *(str(audio / f) for f in files)], timeout=60 + seconds / 5):
                 if item.get("file") in files and "text" in item:
-                    done.append({**item, "pk": files[item["file"]], "stanza": stanzas[files[item["file"]]]})
+                    pk, stanza = files[item["file"]]  # as WAExport found it, not as the export last saw it
+                    done.append({**item, "pk": pk, "stanza": stanza})
     finally:
         _empty(audio)
     with _lock(), connect() as conn:  # a revoke exported meanwhile must win: keep only what is still there
